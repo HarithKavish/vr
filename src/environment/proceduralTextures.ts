@@ -49,6 +49,87 @@ export function createWoodFloorTexture(baseColor = '#8a6242', size = 256): THREE
   return texture;
 }
 
+// A night-city skyline silhouette: gradient sky, a warm horizon glow, and a
+// band of randomly generated buildings with scattered lit windows. Drawn
+// once per wall (not tiled) so each "window" shows a slightly different
+// skyline.
+export function createNightSkylineTexture(width = 512, height = 288): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('2D canvas context unavailable.');
+
+  const sky = ctx.createLinearGradient(0, 0, 0, height);
+  sky.addColorStop(0, '#050810');
+  sky.addColorStop(0.6, '#0a0f1e');
+  sky.addColorStop(1, '#151b2c');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, width, height);
+
+  const glow = ctx.createLinearGradient(0, height * 0.5, 0, height);
+  glow.addColorStop(0, 'rgba(255,170,90,0)');
+  glow.addColorStop(1, 'rgba(255,170,90,0.1)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, height * 0.5, width, height * 0.5);
+
+  let x = 0;
+  while (x < width) {
+    const buildingWidth = 14 + Math.random() * 26;
+    const buildingHeight = 40 + Math.random() * height * 0.6;
+    const buildingY = height - buildingHeight;
+    const shade = 8 + Math.random() * 8;
+    ctx.fillStyle = `rgb(${shade}, ${shade + 2}, ${shade + 6})`;
+    ctx.fillRect(x, buildingY, buildingWidth, buildingHeight);
+
+    const rows = Math.floor(buildingHeight / 11);
+    const cols = Math.max(1, Math.floor(buildingWidth / 7));
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (Math.random() < 0.32) {
+          ctx.fillStyle = Math.random() < 0.8 ? 'rgba(255,214,150,0.9)' : 'rgba(160,200,255,0.75)';
+          ctx.fillRect(x + 2 + c * 7, buildingY + 4 + r * 11, 3, 4);
+        }
+      }
+    }
+    x += buildingWidth + 2 + Math.random() * 4;
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+// A dark polished floor panel texture: subtle seams on a near-black base.
+export function createFloorPanelTexture(size = 256): THREE.CanvasTexture {
+  const { canvas, ctx } = createCanvas(size);
+  ctx.fillStyle = '#0b0c10';
+  ctx.fillRect(0, 0, size, size);
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 1;
+  const panels = 4;
+  for (let i = 1; i < panels; i++) {
+    const p = (size / panels) * i;
+    ctx.beginPath();
+    ctx.moveTo(p, 0);
+    ctx.lineTo(p, size);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, p);
+    ctx.lineTo(size, p);
+    ctx.stroke();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 export function createPlasterTexture(baseColor: string, size = 128): THREE.CanvasTexture {
   const { canvas, ctx } = createCanvas(size);
   ctx.fillStyle = baseColor;
