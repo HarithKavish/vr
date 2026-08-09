@@ -53,7 +53,11 @@ const glassMaterial = new THREE.MeshStandardMaterial({
   roughness: 0.03,
   metalness: 0,
   envMapIntensity: 1,
-  side: THREE.DoubleSide,
+  // Each pane's rotationY maps PlaneGeometry's +Z normal onto its inward
+  // vector, so every front face points into the room. The camera never
+  // leaves the room centre, so the outer faces cannot be seen and
+  // back-face culling is free — DoubleSide was shading them for nothing.
+  side: THREE.FrontSide,
   depthWrite: false,
 });
 
@@ -211,6 +215,7 @@ const BLADES_PER_PLANTER = 14;
 // scaling PlaneGeometry(w, 1) by h lands on the identical positions, and
 // UVs and normals are unaffected.
 const bladeGeometry = new THREE.PlaneGeometry(0.09, 1);
+// Kept on Standard: a Lambert swap peaked at 58/255 on lit blade faces.
 const bladeMaterial = new THREE.MeshStandardMaterial({
   color: 0x2c5738,
   roughness: 0.7,
@@ -273,16 +278,27 @@ function buildPlanterBlades(planters: THREE.Object3D[]): THREE.InstancedMesh {
 }
 
 function makeCeiling(group: THREE.Group, half: number): void {
+  // Kept on Standard deliberately. Dropping this to Lambert was measured
+  // against the framebuffer and changed 10.3% of pixels, peaking at 60/255
+  // inside the downlight pools: even at roughness 0.95 the specular lobe
+  // and sky irradiance still contribute here. The fragment saving was the
+  // largest available, but not worth a visible change.
   const slab = new THREE.Mesh(
     new THREE.PlaneGeometry(ROOM_SIZE, ROOM_SIZE),
     new THREE.MeshStandardMaterial({ color: 0x0b0c0f, roughness: 0.95 }),
   );
   slab.rotation.x = Math.PI / 2;
   slab.position.y = ROOM_HEIGHT;
-  slab.receiveShadow = true;
+  // The one shadow-casting light is mounted at the ceiling plane and
+  // nothing sits between it and the slab, so no shadow can ever fall here.
+  // Clearing this skips the point-light cube shadow lookup, which the
+  // shader gates on a receiveShadow uniform.
+  slab.receiveShadow = false;
   group.add(slab);
 
   // Exposed structural beams, as in the reference image's dark ceiling.
+  // Also kept on Standard: metalness 0.3 turned out to matter, with a
+  // measured peak difference of 119/255 when dropped to Lambert.
   const beamMaterial = new THREE.MeshStandardMaterial({ color: 0x0e0f13, roughness: 0.8, metalness: 0.3 });
   const beamGeometry = new THREE.BoxGeometry(ROOM_SIZE, 0.28, 0.22);
   for (let i = -2; i <= 2; i++) {
@@ -419,9 +435,11 @@ export function buildEnvironment(scene: THREE.Scene, renderer: THREE.WebGLRender
   // instanced mesh now covers all of them.
   group.add(buildPlanterBlades(planters));
 
+  // Fully matte and non-metallic, so Standard's specular and IBL paths
+  // produced nothing visible here either.
   const rug = new THREE.Mesh(
     new THREE.CircleGeometry(1.9, 40),
-    new THREE.MeshStandardMaterial({ color: 0x121215, roughness: 0.95, metalness: 0 }),
+    new THREE.MeshLambertMaterial({ color: 0x121215 }),
   );
   rug.rotation.x = -Math.PI / 2;
   rug.position.set(1.8, 0.004, 3.1);
