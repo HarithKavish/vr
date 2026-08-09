@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 
-// Owns the Three.js renderer/scene and the manual split-viewport stereo
-// render: a fixed-IPD camera pair parented to a rig whose orientation is
-// driven by whichever tracking source is active (WebXR inline pose or
-// DeviceOrientation fallback). Rendering is always manual here — relying on
-// renderer.xr's own immersive-vr compositor turned out to require a real
-// paired headset runtime that most phones don't have, silently leaving the
-// canvas unsplit even though sensor tracking kept working.
+// Owns the Three.js renderer/scene and the stereo render path:
+//
+//   scene -> render target (left half, right half) -> barrel-distortion
+//   pass -> canvas
+//
+// The distortion pass exists because headset lenses pincushion whatever is
+// on the screen, bowing straight lines outward. Pre-warping the image with
+// the inverse (barrel) distortion means the two cancel and the world looks
+// rectilinear through the glass.
 //
 // IPD is a prototype-only constant; expose it here so it is trivial to
 // wire up to a calibration UI later without touching rendering logic.
@@ -21,6 +23,68 @@ export const DEFAULT_LENS_SEPARATION_METERS = 0.063;
 // why lens separation is user-adjustable at runtime.
 const ASSUMED_SCREEN_PPI = 420;
 
+// Radial distortion coefficients at strength 1.0, expressed for a radius
+// normalised to the viewport half-height. Roughly equivalent to the stock
+// Cardboard v2 profile once its tan-angle units are converted.
+const BASE_K1 = 0.12;
+const BASE_K2 = 0.07;
+
+const DISTORTION_VERTEX = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = vec4(position.xy, 0.0, 1.0);
+  }
+`;
+
+// Samples the rendered eye image at a radially expanded offset, which
+// squeezes the periphery inward — the barrel pre-warp. Tone mapping and
+// colour-space conversion happen here because three.js only applies them
+// when drawing to the canvas, and the scene now lands in a render target.
+const DISTORTION_FRAGMENT = /* glsl */ `
+  uniform sampler2D tDiffuse;
+  uniform vec2 uScreenCenterLeft;
+  uniform vec2 uScreenCenterRight;
+  uniform float uK1;
+  uniform float uK2;
+  uniform float uAspect;
+  uniform float uFMax;
+  uniform float uInvMaxR2;
+  varying vec2 vUv;
+
+  void main() {
+    float eye = step(0.5, vUv.x);
+    vec2 local = vec2((vUv.x - eye * 0.5) * 2.0, vUv.y);
+
+    // The widened render keeps its optical axis at the same place as the
+    // screen's lens centre, so one centre serves for both.
+    vec2 center = mix(uScreenCenterLeft, uScreenCenterRight, eye);
+
+    vec2 offset = local - center;
+    vec2 normalised = vec2(offset.x * 2.0 * uAspect, offset.y * 2.0);
+    // Normalised so r = 1 at the furthest corner, which keeps the
+    // coefficients meaning the same thing at any aspect or lens offset.
+    float r2 = dot(normalised, normalised) * uInvMaxR2;
+    float scale = (1.0 + uK1 * r2 + uK2 * r2 * r2) / uFMax;
+
+    vec2 sourceLocal = center + offset * scale;
+
+    bool inside = sourceLocal.x >= 0.0 && sourceLocal.x <= 1.0
+               && sourceLocal.y >= 0.0 && sourceLocal.y <= 1.0;
+
+    vec4 texel = vec4(0.0, 0.0, 0.0, 1.0);
+    if (inside) {
+      vec2 sourceUv = vec2(sourceLocal.x * 0.5 + eye * 0.5, sourceLocal.y);
+      texel = texture2D(tDiffuse, sourceUv);
+    }
+
+    gl_FragColor = texel;
+
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  }
+`;
+
 export class StereoRenderer {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
@@ -30,8 +94,15 @@ export class StereoRenderer {
   private readonly rightCamera: THREE.PerspectiveCamera;
   private ipd = DEFAULT_IPD_METERS;
   private lensSeparation = DEFAULT_LENS_SEPARATION_METERS;
+  private distortionStrength = 1;
   private lastWidth = 0;
+  private lastHeight = 0;
   private readonly sizeScratch = new THREE.Vector2();
+
+  private readonly renderTarget: THREE.WebGLRenderTarget;
+  private readonly distortionScene = new THREE.Scene();
+  private readonly distortionCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  private readonly distortionMaterial: THREE.ShaderMaterial;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
@@ -47,6 +118,34 @@ export class StereoRenderer {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.15;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    // Half float keeps the dark night scene free of banding, since the
+    // scene no longer writes straight to the 8-bit canvas. MSAA has to be
+    // requested explicitly: the canvas's own antialias flag does not apply
+    // to render targets.
+    this.renderTarget = new THREE.WebGLRenderTarget(1, 1, {
+      type: THREE.HalfFloatType,
+      samples: 4,
+      depthBuffer: true,
+    });
+
+    this.distortionMaterial = new THREE.ShaderMaterial({
+      vertexShader: DISTORTION_VERTEX,
+      fragmentShader: DISTORTION_FRAGMENT,
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        tDiffuse: { value: this.renderTarget.texture },
+        uScreenCenterLeft: { value: new THREE.Vector2(0.5, 0.5) },
+        uScreenCenterRight: { value: new THREE.Vector2(0.5, 0.5) },
+        uK1: { value: BASE_K1 },
+        uK2: { value: BASE_K2 },
+        uAspect: { value: 1 },
+        uFMax: { value: 1 },
+        uInvMaxR2: { value: 1 },
+      },
+    });
+    this.distortionScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.distortionMaterial));
 
     // Far plane must clear the city (~330m out). Near stays at 0.1 rather
     // than 0.05 to keep enough depth precision across that larger range.
@@ -76,83 +175,140 @@ export class StereoRenderer {
     if (width <= 0 || height <= 0) return;
 
     this.lastWidth = width;
+    this.lastHeight = height;
 
     this.renderer.setSize(width, height, false);
+    const pixelRatio = this.renderer.getPixelRatio();
+    this.renderTarget.setSize(Math.floor(width * pixelRatio), Math.floor(height * pixelRatio));
+
     const halfAspect = width / 2 / height;
     this.leftCamera.aspect = halfAspect;
     this.rightCamera.aspect = halfAspect;
-    this.leftCamera.updateProjectionMatrix();
-    this.rightCamera.updateProjectionMatrix();
-    this.applyLensOffsets();
+    this.applyEyeProjections();
   }
 
   setLensSeparation(meters: number): void {
     this.lensSeparation = Math.min(0.085, Math.max(0.045, meters));
-    if (this.lastWidth > 0) {
-      // updateProjectionMatrix rebuilds the matrix from scratch, wiping the
-      // off-axis term, so both must be reapplied together.
-      this.leftCamera.updateProjectionMatrix();
-      this.rightCamera.updateProjectionMatrix();
-      this.applyLensOffsets();
-    }
+    this.applyEyeProjections();
   }
 
   getLensSeparation(): number {
     return this.lensSeparation;
   }
 
-  // Shifts each eye's image so its optical centre lands on the headset's
-  // lens centre rather than the centre of its screen half. Without this the
-  // image centres sit half a screen width apart (~75mm on a typical phone)
-  // while the lenses are ~63mm apart, and the eyes cannot converge — the
-  // view stays split as two separate images instead of fusing into one.
-  private applyLensOffsets(): void {
+  // 0 disables the warp entirely, which is the escape hatch if a given
+  // headset's lenses need none.
+  setDistortionStrength(strength: number): void {
+    this.distortionStrength = Math.min(2.5, Math.max(0, strength));
+    this.applyEyeProjections();
+  }
+
+  getDistortionStrength(): number {
+    return this.distortionStrength;
+  }
+
+  // Rebuilds both eye frusta and every uniform the distortion pass depends
+  // on. These are computed together because the widened field of view, the
+  // off-axis term and the sampling centres are all functions of each other.
+  private applyEyeProjections(): void {
+    if (this.lastWidth <= 0 || this.lastHeight <= 0) return;
+
+    const k1 = BASE_K1 * this.distortionStrength;
+    const k2 = BASE_K2 * this.distortionStrength;
+
+    // Shift, in NDC, that puts each eye's optical centre on its lens centre.
     const physicalWidth = (this.lastWidth * (window.devicePixelRatio || 1) / ASSUMED_SCREEN_PPI) * 0.0254;
     const halfViewportWidth = physicalWidth / 4;
-    if (halfViewportWidth <= 0) return;
+    const ndcShift = halfViewportWidth > 0
+      ? (halfViewportWidth - this.lensSeparation / 2) / halfViewportWidth
+      : 0;
 
-    // How far each image centre must move inward, in metres, then expressed
-    // in NDC where 1 unit spans half of one eye's viewport.
-    const shiftMeters = halfViewportWidth - this.lensSeparation / 2;
-    const ndcShift = shiftMeters / halfViewportWidth;
+    const screenCenterLeftX = (1 + ndcShift) / 2;
+    const screenCenterRightX = (1 - ndcShift) / 2;
 
-    // elements[8] is the projection's horizontal off-axis term; a positive
-    // value slides the image left, so the signs are mirrored per eye.
-    this.leftCamera.projectionMatrix.elements[8] = -ndcShift;
-    this.rightCamera.projectionMatrix.elements[8] = ndcShift;
-    this.leftCamera.projectionMatrixInverse.copy(this.leftCamera.projectionMatrix).invert();
-    this.rightCamera.projectionMatrixInverse.copy(this.rightCamera.projectionMatrix).invert();
+    // Aspect of a single eye's viewport, used so the distortion radius is
+    // isotropic in physical pixels rather than in UV space.
+    const aspect = this.lastWidth / 2 / this.lastHeight;
+
+    // The warp pulls the periphery inward, so the render must cover more
+    // than the screen does or the edges would come back black. Size that
+    // margin from the furthest corner, which is the worst case.
+    let maxR2 = 0;
+    for (const [cornerX, cornerY] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
+      const dx = (cornerX - screenCenterLeftX) * 2 * aspect;
+      const dy = (cornerY - 0.5) * 2;
+      maxR2 = Math.max(maxR2, dx * dx + dy * dy);
+    }
+    // With the radius normalised to that corner, the worst-case expansion
+    // is simply f(1) — about 19% at full strength, rather than something
+    // that balloons with the aspect ratio.
+    const fMax = 1 + k1 + k2;
+
+    this.leftCamera.updateProjectionMatrix();
+    this.rightCamera.updateProjectionMatrix();
+
+    // Widening the frustum scales the focal terms down. The off-axis term
+    // is deliberately left alone: scaling it too would drag the optical
+    // axis toward the middle and shrink the margin on the far side, which
+    // is exactly where the warp reaches furthest. Holding the axis fixed
+    // makes both edges land exactly on the render target's edges.
+    for (const camera of [this.leftCamera, this.rightCamera]) {
+      const sign = camera === this.leftCamera ? -1 : 1;
+      const elements = camera.projectionMatrix.elements;
+      elements[0] /= fMax;
+      elements[5] /= fMax;
+      elements[8] = sign * ndcShift;
+      camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+    }
+
+    const uniforms = this.distortionMaterial.uniforms;
+    uniforms.uK1.value = k1;
+    uniforms.uK2.value = k2;
+    uniforms.uAspect.value = aspect;
+    uniforms.uFMax.value = fMax;
+    uniforms.uInvMaxR2.value = maxR2 > 0 ? 1 / maxR2 : 1;
+    uniforms.uScreenCenterLeft.value.set(screenCenterLeftX, 0.5);
+    uniforms.uScreenCenterRight.value.set(screenCenterRightX, 0.5);
   }
 
   setRigQuaternion(quaternion: THREE.Quaternion): void {
     this.rig.quaternion.copy(quaternion);
   }
 
-  // Renders left/right halves with no gap, no viewport stretching.
   renderStereoFrame(): void {
-    // getSize reports CSS pixels, which is what setViewport/setScissor
-    // expect — they apply the pixel ratio themselves. Reading
-    // domElement.width here instead would double-apply it, blowing the
-    // left eye up to full width and pushing the right eye off-screen.
     this.renderer.getSize(this.sizeScratch);
     const width = this.sizeScratch.x;
     const height = this.sizeScratch.y;
-    const halfWidth = width / 2;
+    if (width <= 0 || height <= 0) return;
 
-    this.renderer.setScissorTest(true);
+    const targetWidth = this.renderTarget.width;
+    const targetHeight = this.renderTarget.height;
+    const halfTarget = Math.floor(targetWidth / 2);
 
-    this.renderer.setViewport(0, 0, halfWidth, height);
-    this.renderer.setScissor(0, 0, halfWidth, height);
+    // Render-target viewports come from the target itself, in its own
+    // pixels — renderer.setViewport only applies when drawing to the canvas.
+    this.renderTarget.scissorTest = true;
+
+    this.renderTarget.viewport.set(0, 0, halfTarget, targetHeight);
+    this.renderTarget.scissor.set(0, 0, halfTarget, targetHeight);
+    this.renderer.setRenderTarget(this.renderTarget);
     this.renderer.render(this.scene, this.leftCamera);
 
-    this.renderer.setViewport(halfWidth, 0, width - halfWidth, height);
-    this.renderer.setScissor(halfWidth, 0, width - halfWidth, height);
+    this.renderTarget.viewport.set(halfTarget, 0, targetWidth - halfTarget, targetHeight);
+    this.renderTarget.scissor.set(halfTarget, 0, targetWidth - halfTarget, targetHeight);
+    this.renderer.setRenderTarget(this.renderTarget);
     this.renderer.render(this.scene, this.rightCamera);
 
+    this.renderTarget.scissorTest = false;
+    this.renderer.setRenderTarget(null);
     this.renderer.setScissorTest(false);
+    this.renderer.setViewport(0, 0, width, height);
+    this.renderer.render(this.distortionScene, this.distortionCamera);
   }
 
   dispose(): void {
+    this.renderTarget.dispose();
+    this.distortionMaterial.dispose();
     this.renderer.dispose();
   }
 }

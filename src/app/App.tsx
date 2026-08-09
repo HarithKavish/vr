@@ -62,11 +62,13 @@ export function App(): JSX.Element {
         // All controls live in the scene so they render through the same
         // stereo path as the room and appear properly in both eyes.
         const ui = new VRInterface([
-          { id: 'center', label: 'CENTER', onSelect: () => handleCenterView() },
-          { id: 'eye-minus', label: 'EYE −', onSelect: () => adjustLensSeparation(-2) },
-          { id: 'eye-plus', label: 'EYE +', onSelect: () => adjustLensSeparation(2) },
-          { id: 'info', label: 'INFO', onSelect: () => ui.setInfoVisible(!ui.isInfoVisible()) },
-          { id: 'exit', label: 'EXIT', onSelect: () => void handleExitVR() },
+          { id: 'center', label: 'CENTER', row: 0, onSelect: () => handleCenterView() },
+          { id: 'info', label: 'INFO', row: 0, onSelect: () => ui.setInfoVisible(!ui.isInfoVisible()) },
+          { id: 'exit', label: 'EXIT', row: 0, onSelect: () => void handleExitVR() },
+          { id: 'eye-minus', label: 'EYE −', row: 1, onSelect: () => adjustLensSeparation(-2) },
+          { id: 'eye-plus', label: 'EYE +', row: 1, onSelect: () => adjustLensSeparation(2) },
+          { id: 'warp-minus', label: 'WARP −', row: 1, onSelect: () => adjustDistortion(-0.15) },
+          { id: 'warp-plus', label: 'WARP +', row: 1, onSelect: () => adjustDistortion(0.15) },
         ]);
         ui.attachReticle(renderer.rig);
         renderer.scene.add(ui.group);
@@ -153,6 +155,7 @@ export function App(): JSX.Element {
       `Orient     ${currentOrientation()}`,
       `Tracking   ${fallbackMotionRef.current?.isReceivingData() ? 'active' : 'idle'}`,
       `Eye sep    ${(renderer.getLensSeparation() * 1000).toFixed(0)}mm`,
+      `Warp       ${renderer.getDistortionStrength().toFixed(2)}`,
       '',
       'Tap x3 off-menu to recentre',
     ]);
@@ -166,6 +169,15 @@ export function App(): JSX.Element {
     const renderer = stereoRendererRef.current;
     if (!renderer) return;
     renderer.setLensSeparation(renderer.getLensSeparation() + deltaMm / 1000);
+    refreshInfoPanel();
+  }, [refreshInfoPanel]);
+
+  // Lens pincushion varies by headset, so the amount of counter-warp does
+  // too. 0 turns it off entirely for lenses that need none.
+  const adjustDistortion = useCallback((delta: number) => {
+    const renderer = stereoRendererRef.current;
+    if (!renderer) return;
+    renderer.setDistortionStrength(renderer.getDistortionStrength() + delta);
     refreshInfoPanel();
   }, [refreshInfoPanel]);
 

@@ -19,6 +19,9 @@ export interface VRButtonSpec {
   id: string;
   label: string;
   onSelect: () => void;
+  // Buttons are laid out in rows; more than about five across becomes an
+  // uncomfortably wide sweep of the head to reach the ends.
+  row?: number;
 }
 
 interface VRButton {
@@ -72,28 +75,45 @@ export class VRInterface {
     const buttonWidth = 0.34;
     const buttonHeight = 0.15;
     const gap = 0.03;
-    const totalWidth = specs.length * buttonWidth + (specs.length - 1) * gap;
-    const startX = -totalWidth / 2 + buttonWidth / 2;
+    const rowSpacing = buttonHeight + gap;
+    const topRowY = 1.12;
 
-    specs.forEach((spec, index) => {
-      const { canvas, ctx } = makeCanvas(320, 140);
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.colorSpace = THREE.SRGBColorSpace;
+    const rows = new Map<number, VRButtonSpec[]>();
+    for (const spec of specs) {
+      const row = spec.row ?? 0;
+      const existing = rows.get(row);
+      if (existing) existing.push(spec);
+      else rows.set(row, [spec]);
+    }
 
-      const mesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(buttonWidth, buttonHeight),
-        // Basic (unlit) so the UI stays readable in a dark night scene.
-        new THREE.MeshBasicMaterial({ map: texture, transparent: true }),
-      );
-      mesh.position.set(startX + index * (buttonWidth + gap), 1.0, -PANEL_DISTANCE);
-      mesh.renderOrder = 10;
+    for (const [row, rowSpecs] of rows) {
+      const totalWidth = rowSpecs.length * buttonWidth + (rowSpecs.length - 1) * gap;
+      const startX = -totalWidth / 2 + buttonWidth / 2;
 
-      const button: VRButton = { spec, mesh, canvas, ctx, texture, hovered: false };
-      this.drawButton(button);
-      this.buttons.push(button);
-      this.meshes.push(mesh);
-      this.group.add(mesh);
-    });
+      rowSpecs.forEach((spec, index) => {
+        const { canvas, ctx } = makeCanvas(320, 140);
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+
+        const mesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(buttonWidth, buttonHeight),
+          // Basic (unlit) so the UI stays readable in a dark night scene.
+          new THREE.MeshBasicMaterial({ map: texture, transparent: true }),
+        );
+        mesh.position.set(
+          startX + index * (buttonWidth + gap),
+          topRowY - row * rowSpacing,
+          -PANEL_DISTANCE,
+        );
+        mesh.renderOrder = 10;
+
+        const button: VRButton = { spec, mesh, canvas, ctx, texture, hovered: false };
+        this.drawButton(button);
+        this.buttons.push(button);
+        this.meshes.push(mesh);
+        this.group.add(mesh);
+      });
+    }
 
     const info = makeCanvas(512, 320);
     this.infoCanvas = info.canvas;
@@ -104,7 +124,7 @@ export class VRInterface {
       new THREE.PlaneGeometry(0.62, 0.39),
       new THREE.MeshBasicMaterial({ map: this.infoTexture, transparent: true }),
     );
-    this.infoMesh.position.set(0, 1.46, -PANEL_DISTANCE);
+    this.infoMesh.position.set(0, 1.62, -PANEL_DISTANCE);
     this.infoMesh.renderOrder = 10;
     this.group.add(this.infoMesh);
     this.setInfoLines([]);
