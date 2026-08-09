@@ -11,6 +11,10 @@ import { LandingScreen } from '../ui/LandingScreen';
 
 type Phase = 'landing' | 'starting' | 'active';
 
+// Longest pause allowed between taps still counted as one gesture. Generous,
+// because a headset lever is a clumsier input than a fingertip.
+const TRIPLE_TAP_GAP_MS = 800;
+
 export function App(): JSX.Element {
   const [phase, setPhase] = useState<Phase>('landing');
   const [caps, setCaps] = useState<VRCapabilities | null>(null);
@@ -23,6 +27,7 @@ export function App(): JSX.Element {
   const vrInterfaceRef = useRef<VRInterface | null>(null);
   const calibrationRef = useRef(new Calibration());
   const fpsRef = useRef({ frames: 0, lastSample: performance.now() });
+  const tapTimesRef = useRef<number[]>([]);
   // Diagnostics live in a ref, not React state: they refresh twice a second
   // and now render into the scene, so routing them through React would only
   // re-render the tree for nothing.
@@ -148,6 +153,8 @@ export function App(): JSX.Element {
       `Orient     ${currentOrientation()}`,
       `Tracking   ${fallbackMotionRef.current?.isReceivingData() ? 'active' : 'idle'}`,
       `Eye sep    ${(renderer.getLensSeparation() * 1000).toFixed(0)}mm`,
+      '',
+      'Tap x3 off-menu to recentre',
     ]);
   }, []);
 
@@ -190,15 +197,39 @@ export function App(): JSX.Element {
   // The headset's button is just a capacitive tap on the screen, and it
   // lands wherever the lever touches — so any tap anywhere counts as a
   // select on whatever the reticle is currently over.
+  //
+  // Three taps on empty space recentres the view. Taps that hit a button
+  // deliberately do not count toward that: otherwise tapping EYE + three
+  // times to adjust separation would recentre instead, and a stray triple
+  // tap aimed at EXIT would be destructive.
   useEffect(() => {
     if (phase !== 'active') return;
+
     const onTap = (event: Event) => {
       event.preventDefault();
-      vrInterfaceRef.current?.activate();
+      const ui = vrInterfaceRef.current;
+      if (!ui) return;
+
+      if (ui.activate()) {
+        tapTimesRef.current.length = 0;
+        return;
+      }
+
+      const now = performance.now();
+      const taps = tapTimesRef.current;
+      if (taps.length > 0 && now - taps[taps.length - 1] > TRIPLE_TAP_GAP_MS) {
+        taps.length = 0;
+      }
+      taps.push(now);
+      if (taps.length >= 3) {
+        taps.length = 0;
+        handleCenterView();
+      }
     };
+
     window.addEventListener('pointerdown', onTap);
     return () => window.removeEventListener('pointerdown', onTap);
-  }, [phase]);
+  }, [phase, handleCenterView]);
 
   useEffect(() => {
     const onResize = () => {
