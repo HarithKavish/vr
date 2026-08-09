@@ -57,6 +57,8 @@ export function App(): JSX.Element {
       if (!stereoRendererRef.current) {
         const renderer = new StereoRenderer(canvasRef.current);
         buildEnvironment(renderer.scene, renderer.renderer);
+        // Bake the shadow maps once, now that the lights and casters exist.
+        renderer.requestShadowUpdate();
         stereoRendererRef.current = renderer;
 
         // All controls live in the scene so they render through the same

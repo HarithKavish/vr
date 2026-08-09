@@ -37,13 +37,22 @@ const frameMaterial = new THREE.MeshStandardMaterial({ color: 0x0a0b0e, roughnes
 // Glazing: thin, weakly reflective, and mostly transparent. Physical glass
 // with transmission would be more accurate but costs a scene render per
 // frame — unusable here, where the scene already renders twice for stereo.
-const glassMaterial = new THREE.MeshPhysicalMaterial({
+// Standard rather than Physical. Physical is the heaviest shader three.js
+// ships — it carries the clearcoat, sheen, iridescence and transmission
+// paths whether or not they are used — and this glazing used none of them,
+// only `reflectivity`, which Standard reproduces through envMapIntensity.
+// It covers all four walls and is transparent, so it is also the scene's
+// largest source of overdraw, making it the worst place to pay for it.
+const glassMaterial = new THREE.MeshStandardMaterial({
   color: 0xaecbff,
   transparent: true,
   opacity: 0.08,
+  // Physical's reflectivity 0.55 works out to F0 ~0.044, which is within a
+  // rounding error of Standard's fixed 0.04 at metalness 0 — so these
+  // values reproduce the old Fresnel response rather than approximating it.
   roughness: 0.03,
   metalness: 0,
-  reflectivity: 0.55,
+  envMapIntensity: 1,
   side: THREE.DoubleSide,
   depthWrite: false,
 });

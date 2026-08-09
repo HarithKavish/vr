@@ -49,13 +49,18 @@ function buildInstancedClass(cls: HeightClass, variant: number): THREE.Instanced
   const geometry = new THREE.BoxGeometry(1, 1, 1);
   geometry.translate(0, 0.5, 0); // origin at base, so scaling grows upward
 
-  const material = new THREE.MeshStandardMaterial({
+  // Lambert rather than Standard. The city sits 26-330m out, well beyond
+  // every point light's 26m range, so the full PBR path was evaluating
+  // nine point lights, a directional, a hemisphere and image-based
+  // lighting per fragment to produce a contribution of essentially zero —
+  // over the largest screen area in the scene. Lambert keeps the moonlight
+  // and hemisphere shading on the facades and the emissive windows, which
+  // is all that was actually visible here.
+  const material = new THREE.MeshLambertMaterial({
     map,
     emissiveMap,
     emissive: 0xffffff,
     emissiveIntensity: 2.2,
-    roughness: 0.55,
-    metalness: 0.15,
   });
 
   const mesh = new THREE.InstancedMesh(geometry, material, cls.count);
