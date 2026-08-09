@@ -28,9 +28,18 @@ export class StereoRenderer {
     // deliberate perf trade for visual realism on this build.
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Filmic tone mapping + a correct sRGB output pipeline. This is the
+    // single largest "photographic vs. CG" difference available without
+    // post-processing: it rolls off bright emissives instead of clipping
+    // them to flat white.
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-    this.leftCamera = new THREE.PerspectiveCamera(60, 1, 0.05, 100);
-    this.rightCamera = new THREE.PerspectiveCamera(60, 1, 0.05, 100);
+    // Far plane must clear the city (~330m out). Near stays at 0.1 rather
+    // than 0.05 to keep enough depth precision across that larger range.
+    this.leftCamera = new THREE.PerspectiveCamera(60, 1, 0.1, 900);
+    this.rightCamera = new THREE.PerspectiveCamera(60, 1, 0.1, 900);
     this.rig.add(this.leftCamera, this.rightCamera);
     this.rig.position.set(0, 1.6, 0); // average standing eye height, room center
     this.scene.add(this.rig);

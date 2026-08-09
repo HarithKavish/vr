@@ -1,15 +1,20 @@
 import * as THREE from 'three';
-import { createFloorPanelTexture, createNightSkylineTexture } from './proceduralTextures';
+import { buildCityScape } from './CityScape';
+import {
+  createFloorPanelTexture,
+  createNightSkyEquirect,
+  createSmudgeRoughnessTexture,
+} from './proceduralTextures';
 
-// A glassy night office: floor-to-ceiling "windows" on all four sides
-// showing a procedurally generated city skyline, a dark polished floor,
-// warm recessed downlights plus amber accent strips, and a small cluster
-// of dark low-poly furniture. No Jarvis/AI holographic UI here by design —
-// that's an explicitly later-phase feature; this is the room only.
+// A glassy night high-rise interior: an open floor plate with floor-to-
+// ceiling glazing, a real 3D city outside, a dark polished floor picking up
+// reflections, and warm recessed lighting.
+//
+// The Jarvis holographic UI from the reference image is deliberately absent
+// — that's an explicitly later-phase feature; this is the room only.
 
 const ROOM_SIZE = 20;
 const ROOM_HEIGHT = 6;
-const WINDOW_INSET = 0.15;
 
 interface WallDef {
   position: [number, number, number];
@@ -27,79 +32,85 @@ function buildWallDefs(half: number): WallDef[] {
   ];
 }
 
-const mullionMaterial = new THREE.MeshStandardMaterial({ color: 0x0c0d10, roughness: 0.4, metalness: 0.5 });
-const mullionGeometryV = new THREE.BoxGeometry(0.05, ROOM_HEIGHT, 0.05);
-const mullionGeometryH = new THREE.BoxGeometry(ROOM_SIZE, 0.05, 0.05);
+const frameMaterial = new THREE.MeshStandardMaterial({ color: 0x0a0b0e, roughness: 0.35, metalness: 0.85 });
 
-function makeWindowWall(def: WallDef): THREE.Group {
+// Glazing: thin, weakly reflective, and mostly transparent. Physical glass
+// with transmission would be more accurate but costs a scene render per
+// frame — unusable here, where the scene already renders twice for stereo.
+const glassMaterial = new THREE.MeshPhysicalMaterial({
+  color: 0xaecbff,
+  transparent: true,
+  opacity: 0.08,
+  roughness: 0.03,
+  metalness: 0,
+  reflectivity: 0.55,
+  side: THREE.DoubleSide,
+  depthWrite: false,
+});
+
+function makeGlazedWall(def: WallDef): THREE.Group {
   const group = new THREE.Group();
+  const origin = new THREE.Vector3(...def.position);
 
-  const skyline = new THREE.Mesh(
-    new THREE.PlaneGeometry(ROOM_SIZE, ROOM_HEIGHT),
-    new THREE.MeshBasicMaterial({ map: createNightSkylineTexture() }),
-  );
-  skyline.position.set(...def.position);
-  skyline.rotation.y = def.rotationY;
-  group.add(skyline);
-
-  const glass = new THREE.Mesh(
-    new THREE.PlaneGeometry(ROOM_SIZE, ROOM_HEIGHT),
-    new THREE.MeshPhysicalMaterial({
-      color: 0x9fc4ff,
-      transparent: true,
-      opacity: 0.06,
-      roughness: 0.05,
-      metalness: 0,
-      side: THREE.DoubleSide,
-    }),
-  );
-  glass.position.copy(new THREE.Vector3(...def.position)).addScaledVector(def.inward, WINDOW_INSET);
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_SIZE, ROOM_HEIGHT), glassMaterial);
+  glass.position.copy(origin);
   glass.rotation.y = def.rotationY;
   group.add(glass);
 
-  const mullionCount = 6;
-  for (let i = 1; i < mullionCount; i++) {
-    const t = (i / mullionCount - 0.5) * ROOM_SIZE;
-    const mullion = new THREE.Mesh(mullionGeometryV, mullionMaterial);
-    mullion.position
-      .set(def.position[0], ROOM_HEIGHT / 2, def.position[2])
-      .add(def.tangent.clone().multiplyScalar(t))
-      .addScaledVector(def.inward, WINDOW_INSET + 0.02);
+  // Vertical mullions dividing the glazing into bays.
+  const bays = 7;
+  const mullionGeometry = new THREE.BoxGeometry(0.07, ROOM_HEIGHT, 0.12);
+  for (let i = 1; i < bays; i++) {
+    const t = (i / bays - 0.5) * ROOM_SIZE;
+    const mullion = new THREE.Mesh(mullionGeometry, frameMaterial);
+    mullion.position.copy(origin).add(def.tangent.clone().multiplyScalar(t));
     mullion.rotation.y = def.rotationY;
+    mullion.castShadow = true;
     group.add(mullion);
   }
-  const midMullion = new THREE.Mesh(mullionGeometryH, mullionMaterial);
-  midMullion.position.set(def.position[0], ROOM_HEIGHT * 0.62, def.position[2]).addScaledVector(def.inward, WINDOW_INSET + 0.02);
-  midMullion.rotation.y = def.rotationY;
-  group.add(midMullion);
+
+  // Head and sill rails.
+  const railGeometry = new THREE.BoxGeometry(ROOM_SIZE, 0.16, 0.16);
+  for (const y of [0.08, ROOM_HEIGHT - 0.08]) {
+    const rail = new THREE.Mesh(railGeometry, frameMaterial);
+    rail.position.set(origin.x, y, origin.z);
+    rail.rotation.y = def.rotationY;
+    group.add(rail);
+  }
+
+  // A transom rail matching the reference image's banded glazing.
+  const transom = new THREE.Mesh(new THREE.BoxGeometry(ROOM_SIZE, 0.08, 0.1), frameMaterial);
+  transom.position.set(origin.x, ROOM_HEIGHT * 0.68, origin.z);
+  transom.rotation.y = def.rotationY;
+  group.add(transom);
 
   return group;
 }
 
-// Simple dark low-poly furniture: an armchair (seat + back + arms + legs).
 function makeArmchair(): THREE.Group {
   const chair = new THREE.Group();
-  const leather = new THREE.MeshStandardMaterial({ color: 0x1b1712, roughness: 0.55, metalness: 0.1 });
-  const trim = new THREE.MeshStandardMaterial({ color: 0x2a2620, roughness: 0.4, metalness: 0.6 });
+  const leather = new THREE.MeshStandardMaterial({ color: 0x15130f, roughness: 0.45, metalness: 0.15 });
+  const metal = new THREE.MeshStandardMaterial({ color: 0x1c1a17, roughness: 0.3, metalness: 0.8 });
 
-  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.14, 0.6), leather);
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.16, 0.62), leather);
   seat.position.y = 0.42;
   chair.add(seat);
 
-  const back = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.55, 0.12), leather);
-  back.position.set(0, 0.7, -0.24);
+  const back = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.58, 0.12), leather);
+  back.position.set(0, 0.72, -0.25);
+  back.rotation.x = -0.12;
   chair.add(back);
 
-  const armGeometry = new THREE.BoxGeometry(0.1, 0.3, 0.55);
+  const armGeometry = new THREE.BoxGeometry(0.09, 0.28, 0.56);
   for (const side of [-1, 1]) {
     const arm = new THREE.Mesh(armGeometry, leather);
-    arm.position.set(side * 0.31, 0.56, 0);
+    arm.position.set(side * 0.32, 0.56, 0);
     chair.add(arm);
   }
 
-  const legGeometry = new THREE.CylinderGeometry(0.025, 0.025, 0.4, 8);
-  for (const [lx, lz] of [[-0.25, -0.25], [0.25, -0.25], [-0.25, 0.25], [0.25, 0.25]] as const) {
-    const leg = new THREE.Mesh(legGeometry, trim);
+  const legGeometry = new THREE.CylinderGeometry(0.022, 0.022, 0.4, 8);
+  for (const [lx, lz] of [[-0.26, -0.26], [0.26, -0.26], [-0.26, 0.26], [0.26, 0.26]] as const) {
+    const leg = new THREE.Mesh(legGeometry, metal);
     leg.position.set(lx, 0.2, lz);
     chair.add(leg);
   }
@@ -115,31 +126,34 @@ function makeArmchair(): THREE.Group {
 
 function makeLowTable(): THREE.Group {
   const table = new THREE.Group();
-  const wood = new THREE.MeshStandardMaterial({ color: 0x2b2118, roughness: 0.4, metalness: 0.3 });
-
-  const top = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.04, 0.55), wood);
-  top.position.y = 0.4;
+  const top = new THREE.Mesh(
+    new THREE.BoxGeometry(1.1, 0.05, 0.62),
+    new THREE.MeshStandardMaterial({ color: 0x14120f, roughness: 0.18, metalness: 0.5 }),
+  );
+  top.position.y = 0.42;
   table.add(top);
 
-  const legGeometry = new THREE.CylinderGeometry(0.02, 0.02, 0.38, 8);
-  for (const [lx, lz] of [[-0.4, -0.22], [0.4, -0.22], [-0.4, 0.22], [0.4, 0.22]] as const) {
-    const leg = new THREE.Mesh(legGeometry, wood);
-    leg.position.set(lx, 0.2, lz);
+  const legGeometry = new THREE.CylinderGeometry(0.018, 0.018, 0.4, 8);
+  const legMaterial = new THREE.MeshStandardMaterial({ color: 0x1c1a17, roughness: 0.3, metalness: 0.8 });
+  for (const [lx, lz] of [[-0.48, -0.24], [0.48, -0.24], [-0.48, 0.24], [0.48, 0.24]] as const) {
+    const leg = new THREE.Mesh(legGeometry, legMaterial);
+    leg.position.set(lx, 0.21, lz);
     table.add(leg);
   }
 
   const books = new THREE.Mesh(
-    new THREE.BoxGeometry(0.22, 0.08, 0.16),
-    new THREE.MeshStandardMaterial({ color: 0x5a2a2a, roughness: 0.7 }),
+    new THREE.BoxGeometry(0.26, 0.07, 0.19),
+    new THREE.MeshStandardMaterial({ color: 0x3d2020, roughness: 0.75 }),
   );
-  books.position.set(-0.2, 0.46, 0.05);
+  books.position.set(-0.24, 0.48, 0.04);
+  books.rotation.y = 0.2;
   table.add(books);
 
   const mug = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.045, 0.04, 0.09, 16),
-    new THREE.MeshStandardMaterial({ color: 0xe8e2d5, roughness: 0.3 }),
+    new THREE.CylinderGeometry(0.043, 0.038, 0.095, 18),
+    new THREE.MeshStandardMaterial({ color: 0xdad4c6, roughness: 0.35 }),
   );
-  mug.position.set(0.2, 0.47, -0.05);
+  mug.position.set(0.26, 0.47, -0.06);
   table.add(mug);
 
   table.traverse((obj) => {
@@ -151,23 +165,28 @@ function makeLowTable(): THREE.Group {
   return table;
 }
 
-function makeDeskPlant(): THREE.Group {
+function makePlanter(): THREE.Group {
   const plant = new THREE.Group();
   const pot = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.09, 0.11, 0.16, 14),
-    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.6 }),
+    new THREE.CylinderGeometry(0.19, 0.15, 0.42, 18),
+    new THREE.MeshStandardMaterial({ color: 0x17181b, roughness: 0.5, metalness: 0.3 }),
   );
-  pot.position.y = 0.08;
+  pot.position.y = 0.21;
   plant.add(pot);
 
-  const leafMaterial = new THREE.MeshStandardMaterial({ color: 0x2f5d3a, roughness: 0.75 });
-  for (let i = 0; i < 5; i++) {
-    const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.28 + Math.random() * 0.12, 6), leafMaterial);
-    const angle = (i / 5) * Math.PI * 2;
-    leaf.position.set(Math.cos(angle) * 0.03, 0.28, Math.sin(angle) * 0.03);
-    leaf.rotation.z = Math.cos(angle) * 0.3;
-    leaf.rotation.x = Math.sin(angle) * 0.3;
-    plant.add(leaf);
+  const leafMaterial = new THREE.MeshStandardMaterial({
+    color: 0x2c5738,
+    roughness: 0.7,
+    side: THREE.DoubleSide,
+  });
+  for (let i = 0; i < 14; i++) {
+    const length = 0.5 + Math.random() * 0.5;
+    const blade = new THREE.Mesh(new THREE.PlaneGeometry(0.09, length), leafMaterial);
+    const angle = (i / 14) * Math.PI * 2 + Math.random() * 0.3;
+    const lean = 0.25 + Math.random() * 0.5;
+    blade.position.set(Math.cos(angle) * 0.06, 0.42 + length / 2 * 0.8, Math.sin(angle) * 0.06);
+    blade.rotation.set(Math.cos(angle) * lean, angle, Math.sin(angle) * lean);
+    plant.add(blade);
   }
 
   plant.traverse((obj) => {
@@ -179,112 +198,157 @@ function makeDeskPlant(): THREE.Group {
   return plant;
 }
 
-function makeDownlight(x: number, z: number, ceilingY: number, castsShadow: boolean): THREE.Group {
-  const group = new THREE.Group();
-  const fixture = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.12, 0.12, 0.04, 20),
-    new THREE.MeshStandardMaterial({ color: 0xfff2d8, emissive: 0xffb066, emissiveIntensity: 1.2, roughness: 1 }),
+function makeCeiling(group: THREE.Group, half: number): void {
+  const slab = new THREE.Mesh(
+    new THREE.PlaneGeometry(ROOM_SIZE, ROOM_SIZE),
+    new THREE.MeshStandardMaterial({ color: 0x0b0c0f, roughness: 0.95 }),
   );
-  fixture.position.set(x, ceilingY - 0.02, z);
-  fixture.rotation.x = Math.PI / 2;
+  slab.rotation.x = Math.PI / 2;
+  slab.position.y = ROOM_HEIGHT;
+  slab.receiveShadow = true;
+  group.add(slab);
+
+  // Exposed structural beams, as in the reference image's dark ceiling.
+  const beamMaterial = new THREE.MeshStandardMaterial({ color: 0x0e0f13, roughness: 0.8, metalness: 0.3 });
+  const beamGeometry = new THREE.BoxGeometry(ROOM_SIZE, 0.28, 0.22);
+  for (let i = -2; i <= 2; i++) {
+    const beam = new THREE.Mesh(beamGeometry, beamMaterial);
+    beam.position.set(0, ROOM_HEIGHT - 0.16, i * (ROOM_SIZE / 6));
+    group.add(beam);
+  }
+
+  // Recessed linear light coves — the warm streaks running across the
+  // ceiling in the reference.
+  const coveMaterial = new THREE.MeshBasicMaterial({ color: 0xffc98a });
+  for (const [x, z, length, rotY] of [
+    [-half * 0.35, -half * 0.45, ROOM_SIZE * 0.55, Math.PI / 5],
+    [half * 0.4, -half * 0.1, ROOM_SIZE * 0.42, -Math.PI / 7],
+    [half * 0.1, half * 0.5, ROOM_SIZE * 0.5, Math.PI / 9],
+  ] as const) {
+    const cove = new THREE.Mesh(new THREE.BoxGeometry(length, 0.035, 0.07), coveMaterial);
+    cove.position.set(x, ROOM_HEIGHT - 0.32, z);
+    cove.rotation.y = rotY;
+    group.add(cove);
+  }
+}
+
+function makeDownlight(x: number, z: number, castsShadow: boolean): THREE.Group {
+  const group = new THREE.Group();
+
+  const fixture = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.1, 0.1, 0.03, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffd9a8 }),
+  );
+  fixture.position.set(x, ROOM_HEIGHT - 0.04, z);
   group.add(fixture);
 
-  const light = new THREE.PointLight(0xffb066, 5, 12, 2);
-  light.position.set(x, ceilingY - 0.15, z);
+  const light = new THREE.PointLight(0xffb877, 6, 14, 2);
+  light.position.set(x, ROOM_HEIGHT - 0.25, z);
   if (castsShadow) {
     light.castShadow = true;
     light.shadow.mapSize.set(512, 512);
-    light.shadow.bias = -0.002;
+    light.shadow.bias = -0.004;
+    light.shadow.camera.far = 16;
   }
   group.add(light);
 
   return group;
 }
 
-function makeAccentStrip(x: number, z: number, length: number, rotationY: number, ceilingY: number): THREE.Mesh {
-  const strip = new THREE.Mesh(
-    new THREE.BoxGeometry(length, 0.03, 0.06),
-    new THREE.MeshStandardMaterial({ color: 0xffb066, emissive: 0xffa63d, emissiveIntensity: 2, roughness: 1 }),
-  );
-  strip.position.set(x, ceilingY - 0.05, z);
-  strip.rotation.y = rotationY;
-  return strip;
-}
-
-export function buildBasicEnvironment(): THREE.Group {
-  const group = new THREE.Group();
+export function buildEnvironment(scene: THREE.Scene, renderer: THREE.WebGLRenderer): void {
   const half = ROOM_SIZE / 2;
-  const walls = buildWallDefs(half);
+
+  // Sky doubles as the reflection environment. Reflections are what make
+  // glass and polished stone read as real materials rather than flat color.
+  const sky = createNightSkyEquirect();
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  pmrem.compileEquirectangularShader();
+  const envTarget = pmrem.fromEquirectangular(sky);
+  scene.environment = envTarget.texture;
+  scene.background = sky;
+  scene.environmentIntensity = 0.55;
+  pmrem.dispose();
+
+  // Haze thins the distant skyline, which is most of what sells scale.
+  scene.fog = new THREE.FogExp2(0x0a1018, 0.0026);
+
+  const group = new THREE.Group();
 
   const floorTexture = createFloorPanelTexture();
-  floorTexture.repeat.set(ROOM_SIZE / 2, ROOM_SIZE / 2);
+  floorTexture.repeat.set(ROOM_SIZE / 2.5, ROOM_SIZE / 2.5);
+  const floorRoughness = createSmudgeRoughnessTexture();
+  floorRoughness.repeat.set(4, 4);
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(ROOM_SIZE, ROOM_SIZE),
-    new THREE.MeshStandardMaterial({ map: floorTexture, roughness: 0.2, metalness: 0.6 }),
+    new THREE.MeshStandardMaterial({
+      map: floorTexture,
+      roughnessMap: floorRoughness,
+      roughness: 0.34,
+      metalness: 0.9,
+      envMapIntensity: 1.1,
+    }),
   );
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   group.add(floor);
 
-  const ceiling = new THREE.Mesh(
-    new THREE.PlaneGeometry(ROOM_SIZE, ROOM_SIZE),
-    new THREE.MeshStandardMaterial({ color: 0x0f1014, roughness: 0.9 }),
-  );
-  ceiling.rotation.x = Math.PI / 2;
-  ceiling.position.y = ROOM_HEIGHT;
-  ceiling.receiveShadow = true;
-  group.add(ceiling);
+  makeCeiling(group, half);
 
-  for (const wall of walls) {
-    group.add(makeWindowWall(wall));
+  for (const wall of buildWallDefs(half)) {
+    group.add(makeGlazedWall(wall));
   }
 
-  const downlightGrid = [-half * 0.4, 0, half * 0.4];
-  let first = true;
-  for (const gx of downlightGrid) {
-    for (const gz of downlightGrid) {
-      group.add(makeDownlight(gx, gz, ROOM_HEIGHT, first));
-      first = false;
+  const spacing = half * 0.5;
+  let shadowCaster = true;
+  for (const gx of [-spacing, 0, spacing]) {
+    for (const gz of [-spacing, 0, spacing]) {
+      // Only the first light casts shadows; nine shadow-casting point
+      // lights would each add a cubemap render pass, per eye, per frame.
+      group.add(makeDownlight(gx, gz, shadowCaster));
+      shadowCaster = false;
     }
   }
 
-  group.add(makeAccentStrip(-half * 0.5, -half * 0.5, ROOM_SIZE * 0.5, Math.PI / 4, ROOM_HEIGHT));
-  group.add(makeAccentStrip(half * 0.3, -half * 0.2, ROOM_SIZE * 0.35, -Math.PI / 6, ROOM_HEIGHT));
-
   const chairA = makeArmchair();
-  chairA.position.set(2.2, 0, 2.6);
-  chairA.rotation.y = Math.PI * 0.85;
+  chairA.position.set(2.4, 0, 2.8);
+  chairA.rotation.y = Math.PI * 0.86;
   group.add(chairA);
 
   const chairB = makeArmchair();
-  chairB.position.set(1.1, 0, 3.4);
-  chairB.rotation.y = Math.PI * 1.1;
+  chairB.position.set(1.0, 0, 3.7);
+  chairB.rotation.y = Math.PI * 1.16;
   group.add(chairB);
 
   const table = makeLowTable();
-  table.position.set(1.7, 0, 2.9);
-  table.rotation.y = Math.PI * 0.9;
+  table.position.set(1.8, 0, 3.1);
+  table.rotation.y = Math.PI * 0.92;
   group.add(table);
 
-  const plant = makeDeskPlant();
-  plant.position.set(-2.8, 0, -3.2);
-  group.add(plant);
+  for (const [px, pz] of [[-3.4, -3.6], [3.8, -4.2], [-4.2, 3.4]] as const) {
+    const planter = makePlanter();
+    planter.position.set(px, 0, pz);
+    planter.rotation.y = Math.random() * Math.PI;
+    group.add(planter);
+  }
 
   const rug = new THREE.Mesh(
-    new THREE.CircleGeometry(1.6, 32),
-    new THREE.MeshStandardMaterial({ color: 0x1a1a1e, roughness: 0.95 }),
+    new THREE.CircleGeometry(1.9, 40),
+    new THREE.MeshStandardMaterial({ color: 0x121215, roughness: 0.95, metalness: 0 }),
   );
   rug.rotation.x = -Math.PI / 2;
-  rug.position.y = 0.005;
+  rug.position.set(1.8, 0.004, 3.1);
   rug.receiveShadow = true;
   group.add(rug);
 
-  const hemi = new THREE.HemisphereLight(0x30507a, 0x0a0a0c, 0.4);
-  group.add(hemi);
-
-  const moonlight = new THREE.DirectionalLight(0x8fb0ff, 0.25);
-  moonlight.position.set(-half, ROOM_HEIGHT, -half * 0.5);
+  // Cool moonlight from outside balances the warm interior downlights —
+  // that warm/cool split is a large part of the reference image's look.
+  const moonlight = new THREE.DirectionalLight(0x9ec0ff, 0.35);
+  moonlight.position.set(-half * 1.5, ROOM_HEIGHT * 2, -half * 1.2);
   group.add(moonlight);
 
-  return group;
+  const ambient = new THREE.HemisphereLight(0x35507a, 0x08090c, 0.25);
+  group.add(ambient);
+
+  scene.add(group);
+  scene.add(buildCityScape());
 }

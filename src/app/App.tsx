@@ -5,7 +5,7 @@ import { enterVRSession, exitVRSession, currentOrientation, isFullscreenActive }
 import { FallbackMotion } from '../vr/FallbackMotion';
 import { Calibration } from '../vr/Calibration';
 import { StereoRenderer } from '../vr/StereoRenderer';
-import { buildBasicEnvironment } from '../environment/BasicEnvironment';
+import { buildEnvironment } from '../environment/BasicEnvironment';
 import { LandingScreen } from '../ui/LandingScreen';
 import { Diagnostics, type DiagnosticsState } from '../ui/Diagnostics';
 
@@ -56,7 +56,7 @@ export function App(): JSX.Element {
 
       if (!stereoRendererRef.current) {
         const renderer = new StereoRenderer(canvasRef.current);
-        renderer.scene.add(buildBasicEnvironment());
+        buildEnvironment(renderer.scene, renderer.renderer);
         stereoRendererRef.current = renderer;
       }
       const stereoRenderer = stereoRendererRef.current;
