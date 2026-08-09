@@ -1,16 +1,18 @@
 import * as THREE from 'three';
 
-// Wraps WebXR immersive-vr session lifecycle. When WebXR provides the pose,
-// we never combine raw sensor values ourselves — the renderer's XR camera
-// already reflects the tracked viewer pose each frame.
+// Provides head-orientation tracking via a WebXR 'inline' session — supported
+// broadly (no headset/runtime pairing required, unlike 'immersive-vr') and
+// backed by the platform's fused sensor pose rather than raw device events.
+// The actual stereo split is always rendered manually by StereoRenderer; this
+// class only supplies the tracked quaternion, so we never combine raw sensor
+// values ourselves when an XR pose is available.
 export class XRManager {
   private session: XRSession | null = null;
-  private baseReferenceSpace: XRReferenceSpace | null = null;
-  private readonly renderer: THREE.WebGLRenderer;
+  private referenceSpace: XRReferenceSpace | null = null;
+  private readonly latestQuaternion = new THREE.Quaternion();
   private readonly onSessionEnd: () => void;
 
-  constructor(renderer: THREE.WebGLRenderer, onSessionEnd: () => void) {
-    this.renderer = renderer;
+  constructor(onSessionEnd: () => void) {
     this.onSessionEnd = onSessionEnd;
   }
 
@@ -20,20 +22,34 @@ export class XRManager {
       throw new Error('WebXR not available on this device/browser.');
     }
 
-    const session = await nav.xr.requestSession('immersive-vr', {
-      optionalFeatures: ['local-floor'],
-    });
-
+    const session = await nav.xr.requestSession('inline');
     this.session = session;
     session.addEventListener('end', this.handleSessionEnd);
 
-    await this.renderer.xr.setSession(session);
-    this.baseReferenceSpace = this.renderer.xr.getReferenceSpace();
+    try {
+      this.referenceSpace = await session.requestReferenceSpace('local');
+    } catch {
+      this.referenceSpace = await session.requestReferenceSpace('viewer');
+    }
+
+    session.requestAnimationFrame(this.onXRFrame);
   }
+
+  private readonly onXRFrame = (_time: number, frame: XRFrame): void => {
+    if (!this.session || !this.referenceSpace) return;
+
+    const pose = frame.getViewerPose(this.referenceSpace);
+    if (pose) {
+      const o = pose.transform.orientation;
+      this.latestQuaternion.set(o.x, o.y, o.z, o.w);
+    }
+
+    this.session.requestAnimationFrame(this.onXRFrame);
+  };
 
   private readonly handleSessionEnd = (): void => {
     this.session = null;
-    this.baseReferenceSpace = null;
+    this.referenceSpace = null;
     this.onSessionEnd();
   };
 
@@ -47,21 +63,7 @@ export class XRManager {
     return this.session !== null;
   }
 
-  // Recenters the virtual camera on the current head pose by offsetting the
-  // reference space, without touching the underlying tracking data.
-  centerView(frame: XRFrame): void {
-    if (!this.session || !this.baseReferenceSpace) return;
-
-    const pose = frame.getViewerPose(this.baseReferenceSpace);
-    if (!pose) return;
-
-    const { position, orientation } = pose.transform;
-    const inverseTransform = new XRRigidTransform(
-      { x: position.x, y: position.y, z: position.z, w: 1 },
-      { x: orientation.x, y: orientation.y, z: orientation.z, w: orientation.w },
-    );
-
-    const offsetSpace = this.baseReferenceSpace.getOffsetReferenceSpace(inverseTransform);
-    this.renderer.xr.setReferenceSpace(offsetSpace);
+  getQuaternion(out: THREE.Quaternion): THREE.Quaternion {
+    return out.copy(this.latestQuaternion);
   }
 }

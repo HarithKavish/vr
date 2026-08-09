@@ -33,7 +33,6 @@ export function App(): JSX.Element {
   const fallbackMotionRef = useRef<FallbackMotion | null>(null);
   const calibrationRef = useRef(new Calibration());
   const usingXRRef = useRef(false);
-  const latestXRFrameRef = useRef<XRFrame | null>(null);
   const fpsRef = useRef({ frames: 0, lastSample: performance.now() });
 
   useEffect(() => {
@@ -78,9 +77,9 @@ export function App(): JSX.Element {
       });
 
       let usingXR = false;
-      if (caps.immersiveVRSupported) {
+      if (caps.webXRSupported) {
         try {
-          const manager = new XRManager(stereoRenderer.renderer, stopEverything);
+          const manager = new XRManager(stopEverything);
           await manager.start();
           xrManagerRef.current = manager;
           usingXR = true;
@@ -120,19 +119,14 @@ export function App(): JSX.Element {
     const tmpQuat = new THREE.Quaternion();
     const calibratedQuat = new THREE.Quaternion();
 
-    stereoRenderer.renderer.setAnimationLoop((_time, frame) => {
-      if (usingXRRef.current) {
-        if (frame) latestXRFrameRef.current = frame;
-        stereoRenderer.renderXRFrame();
-      } else {
-        const motion = fallbackMotionRef.current;
-        if (motion) {
-          motion.getQuaternion(tmpQuat);
-          calibrationRef.current.apply(tmpQuat, calibratedQuat);
-          stereoRenderer.setRigQuaternion(calibratedQuat);
-        }
-        stereoRenderer.renderFallbackFrame();
+    stereoRenderer.renderer.setAnimationLoop(() => {
+      const source = usingXRRef.current ? xrManagerRef.current : fallbackMotionRef.current;
+      if (source) {
+        source.getQuaternion(tmpQuat);
+        calibrationRef.current.apply(tmpQuat, calibratedQuat);
+        stereoRenderer.setRigQuaternion(calibratedQuat);
       }
+      stereoRenderer.renderStereoFrame();
 
       const fps = fpsRef.current;
       fps.frames += 1;
@@ -146,25 +140,20 @@ export function App(): JSX.Element {
           fps: currentFps,
           fullscreen: isFullscreenActive(),
           orientation: currentOrientation(),
-          tracking: usingXRRef.current ? !!latestXRFrameRef.current : (fallbackMotionRef.current?.isReceivingData() ?? false),
+          tracking: usingXRRef.current
+            ? (xrManagerRef.current?.isActive() ?? false)
+            : (fallbackMotionRef.current?.isReceivingData() ?? false),
         }));
       }
     });
   };
 
   const handleCenterView = useCallback(() => {
-    if (usingXRRef.current) {
-      const manager = xrManagerRef.current;
-      const frame = latestXRFrameRef.current;
-      if (manager && frame) manager.centerView(frame);
-    } else {
-      const motion = fallbackMotionRef.current;
-      if (motion) {
-        const q = new THREE.Quaternion();
-        motion.getQuaternion(q);
-        calibrationRef.current.center(q);
-      }
-    }
+    const source = usingXRRef.current ? xrManagerRef.current : fallbackMotionRef.current;
+    if (!source) return;
+    const q = new THREE.Quaternion();
+    source.getQuaternion(q);
+    calibrationRef.current.center(q);
   }, []);
 
   const handleExitVR = useCallback(async () => {

@@ -1,9 +1,12 @@
 import * as THREE from 'three';
 
-// Owns the Three.js renderer/scene and the two rendering paths:
-//  - WebXR: renderer.xr handles stereo natively from the XR viewer pose.
-//  - Fallback: manual split-viewport rendering with a fixed-IPD camera pair
-//    driven by DeviceOrientation via FallbackMotion + Calibration.
+// Owns the Three.js renderer/scene and the manual split-viewport stereo
+// render: a fixed-IPD camera pair parented to a rig whose orientation is
+// driven by whichever tracking source is active (WebXR inline pose or
+// DeviceOrientation fallback). Rendering is always manual here — relying on
+// renderer.xr's own immersive-vr compositor turned out to require a real
+// paired headset runtime that most phones don't have, silently leaving the
+// canvas unsplit even though sensor tracking kept working.
 //
 // IPD is a prototype-only constant; expose it here so it is trivial to
 // wire up to a calibration UI later without touching rendering logic.
@@ -16,15 +19,11 @@ export class StereoRenderer {
 
   private readonly leftCamera: THREE.PerspectiveCamera;
   private readonly rightCamera: THREE.PerspectiveCamera;
-  // Used only for the WebXR path: renderer.xr replaces this with its own
-  // ArrayCamera derived from the XR views, so it needs no manual IPD offset.
-  readonly xrCamera = new THREE.PerspectiveCamera(60, 1, 0.05, 100);
   private ipd = DEFAULT_IPD_METERS;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.xr.enabled = true;
 
     this.leftCamera = new THREE.PerspectiveCamera(60, 1, 0.05, 100);
     this.rightCamera = new THREE.PerspectiveCamera(60, 1, 0.05, 100);
@@ -57,12 +56,8 @@ export class StereoRenderer {
     this.rig.quaternion.copy(quaternion);
   }
 
-  renderXRFrame(): void {
-    this.renderer.render(this.scene, this.xrCamera);
-  }
-
   // Renders left/right halves with no gap, no viewport stretching.
-  renderFallbackFrame(): void {
+  renderStereoFrame(): void {
     const width = this.renderer.domElement.width;
     const height = this.renderer.domElement.height;
     const halfWidth = width / 2;
