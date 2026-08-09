@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { detectCapabilities, type VRCapabilities } from '../vr/VRCapabilities';
 import { enterVRSession, exitVRSession, currentOrientation, isFullscreenActive } from '../vr/VRSession';
-import { XRManager } from '../vr/XRManager';
 import { FallbackMotion } from '../vr/FallbackMotion';
 import { Calibration } from '../vr/Calibration';
 import { StereoRenderer } from '../vr/StereoRenderer';
@@ -29,10 +28,8 @@ export function App(): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stereoRendererRef = useRef<StereoRenderer | null>(null);
-  const xrManagerRef = useRef<XRManager | null>(null);
   const fallbackMotionRef = useRef<FallbackMotion | null>(null);
   const calibrationRef = useRef(new Calibration());
-  const usingXRRef = useRef(false);
   const fpsRef = useRef({ frames: 0, lastSample: performance.now() });
 
   useEffect(() => {
@@ -76,37 +73,26 @@ export function App(): JSX.Element {
         });
       });
 
-      let usingXR = false;
-      if (caps.webXRSupported) {
-        try {
-          const manager = new XRManager(stopEverything);
-          await manager.start();
-          xrManagerRef.current = manager;
-          usingXR = true;
-        } catch (xrError) {
-          usingXR = false;
-          xrManagerRef.current = null;
-          console.warn('WebXR session failed, falling back to DeviceOrientation.', xrError);
+      // Tracking uses DeviceOrientation exclusively this phase. WebXR's
+      // immersive-vr path requires a paired headset runtime most phones
+      // don't have (isSessionSupported can report true with nothing behind
+      // it), and driving an 'inline' session on the same WebGL context as
+      // our own manual rendering risks undefined browser behavior. caps.*
+      // WebXR fields remain purely informational in the diagnostics/status UI.
+      if (caps.deviceOrientationNeedsPermission) {
+        const granted = await FallbackMotion.requestPermission();
+        if (!granted) {
+          setErrorMessage('Motion permission denied. Enable motion/sensor access for this website and try again.');
+          setPhase('landing');
+          return;
         }
       }
-      usingXRRef.current = usingXR;
-
-      if (!usingXR) {
-        if (caps.deviceOrientationNeedsPermission) {
-          const granted = await FallbackMotion.requestPermission();
-          if (!granted) {
-            setErrorMessage('Motion permission denied. Enable motion/sensor access for this website and try again.');
-            setPhase('landing');
-            return;
-          }
-        }
-        const motion = new FallbackMotion();
-        motion.start();
-        fallbackMotionRef.current = motion;
-      }
+      const motion = new FallbackMotion();
+      motion.start();
+      fallbackMotionRef.current = motion;
 
       startRenderLoop(stereoRenderer);
-      setDiagnostics((d) => ({ ...d, vrActive: true, webXR: usingXR }));
+      setDiagnostics((d) => ({ ...d, vrActive: true, webXR: false }));
       setPhase('active');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to start VR session.';
@@ -120,9 +106,9 @@ export function App(): JSX.Element {
     const calibratedQuat = new THREE.Quaternion();
 
     stereoRenderer.renderer.setAnimationLoop(() => {
-      const source = usingXRRef.current ? xrManagerRef.current : fallbackMotionRef.current;
-      if (source) {
-        source.getQuaternion(tmpQuat);
+      const motion = fallbackMotionRef.current;
+      if (motion) {
+        motion.getQuaternion(tmpQuat);
         calibrationRef.current.apply(tmpQuat, calibratedQuat);
         stereoRenderer.setRigQuaternion(calibratedQuat);
       }
@@ -140,28 +126,22 @@ export function App(): JSX.Element {
           fps: currentFps,
           fullscreen: isFullscreenActive(),
           orientation: currentOrientation(),
-          tracking: usingXRRef.current
-            ? (xrManagerRef.current?.isActive() ?? false)
-            : (fallbackMotionRef.current?.isReceivingData() ?? false),
+          tracking: fallbackMotionRef.current?.isReceivingData() ?? false,
         }));
       }
     });
   };
 
   const handleCenterView = useCallback(() => {
-    const source = usingXRRef.current ? xrManagerRef.current : fallbackMotionRef.current;
-    if (!source) return;
+    const motion = fallbackMotionRef.current;
+    if (!motion) return;
     const q = new THREE.Quaternion();
-    source.getQuaternion(q);
+    motion.getQuaternion(q);
     calibrationRef.current.center(q);
   }, []);
 
   const handleExitVR = useCallback(async () => {
     stereoRendererRef.current?.renderer.setAnimationLoop(null);
-    if (xrManagerRef.current) {
-      await xrManagerRef.current.stop();
-      xrManagerRef.current = null;
-    }
     fallbackMotionRef.current?.stop();
     fallbackMotionRef.current = null;
     await exitVRSession();

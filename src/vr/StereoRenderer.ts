@@ -44,6 +44,11 @@ export class StereoRenderer {
   }
 
   resize(width: number, height: number): void {
+    // Layout can transiently report a zero dimension mid fullscreen/
+    // orientation transition; a NaN/Infinity aspect would otherwise poison
+    // the projection matrix and render nothing until the next valid resize.
+    if (width <= 0 || height <= 0) return;
+
     this.renderer.setSize(width, height, false);
     const halfAspect = width / 2 / height;
     this.leftCamera.aspect = halfAspect;
