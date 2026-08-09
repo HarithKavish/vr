@@ -24,6 +24,10 @@ export class StereoRenderer {
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Real shadow maps, rendered twice per frame (once per eye) — a
+    // deliberate perf trade for visual realism on this build.
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.leftCamera = new THREE.PerspectiveCamera(60, 1, 0.05, 100);
     this.rightCamera = new THREE.PerspectiveCamera(60, 1, 0.05, 100);
