@@ -12,8 +12,10 @@ import * as THREE from 'three';
 const DEG2RAD = Math.PI / 180;
 
 const EULER_ORDER = 'YXZ' as const;
-const worldZUp = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
-const worldZUpInverse = worldZUp.clone().invert();
+// -90 deg around X: reorients the device's "screen normal" frame (Z out of
+// the glass) into Three.js's world frame (Y up), per the W3C conversion.
+const minusHalfPiAroundX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+const screenTransform = new THREE.Quaternion();
 
 function screenOrientationAngle(): number {
   if (screen.orientation && typeof screen.orientation.angle === 'number') {
@@ -92,11 +94,9 @@ export class FallbackMotion {
 
     this.euler.set(beta, alpha, -gamma, EULER_ORDER);
     this.quaternion.setFromEuler(this.euler);
-    this.quaternion.multiply(worldZUp);
-    this.quaternion.multiply(
-      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -orient),
-    );
-    this.quaternion.multiply(worldZUpInverse);
+    this.quaternion.multiply(minusHalfPiAroundX);
+    screenTransform.setFromAxisAngle(new THREE.Vector3(0, 0, 1), -orient);
+    this.quaternion.multiply(screenTransform);
   }
 
   getQuaternion(out: THREE.Quaternion): THREE.Quaternion {

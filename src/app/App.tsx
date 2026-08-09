@@ -67,6 +67,16 @@ export function App(): JSX.Element {
       stereoRenderer.resize(window.innerWidth, window.innerHeight);
       calibrationRef.current.reset();
 
+      // Fullscreen/orientation-lock transitions above often settle a beat
+      // after their promises resolve, so re-measure a couple of frames out
+      // to catch dimensions that hadn't landed yet on the first resize.
+      requestAnimationFrame(() => {
+        stereoRendererRef.current?.resize(window.innerWidth, window.innerHeight);
+        requestAnimationFrame(() => {
+          stereoRendererRef.current?.resize(window.innerWidth, window.innerHeight);
+        });
+      });
+
       let usingXR = false;
       if (caps.immersiveVRSupported) {
         try {
@@ -173,8 +183,19 @@ export function App(): JSX.Element {
     const onResize = () => {
       stereoRendererRef.current?.resize(window.innerWidth, window.innerHeight);
     };
+    // 'resize' alone is unreliable right after a fullscreen/orientation-lock
+    // transition on mobile — those settle asynchronously, sometimes without
+    // firing 'resize' at all, leaving the canvas sized to stale dimensions.
     window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    document.addEventListener('fullscreenchange', onResize);
+    screen.orientation?.addEventListener('change', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+      document.removeEventListener('fullscreenchange', onResize);
+      screen.orientation?.removeEventListener('change', onResize);
+    };
   }, []);
 
   useEffect(() => {
