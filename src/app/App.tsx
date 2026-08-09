@@ -67,8 +67,10 @@ export function App(): JSX.Element {
           { id: 'exit', label: 'EXIT', row: 0, onSelect: () => void handleExitVR() },
           { id: 'eye-minus', label: 'EYE −', row: 1, onSelect: () => adjustLensSeparation(-2) },
           { id: 'eye-plus', label: 'EYE +', row: 1, onSelect: () => adjustLensSeparation(2) },
-          { id: 'warp-minus', label: 'WARP −', row: 1, onSelect: () => adjustDistortion(-0.15) },
-          { id: 'warp-plus', label: 'WARP +', row: 1, onSelect: () => adjustDistortion(0.15) },
+          { id: 'fov-minus', label: 'FOV −', row: 1, onSelect: () => adjustFieldOfView(-5) },
+          { id: 'fov-plus', label: 'FOV +', row: 1, onSelect: () => adjustFieldOfView(5) },
+          { id: 'warp-minus', label: 'WARP −', row: 2, onSelect: () => adjustDistortion(-0.15) },
+          { id: 'warp-plus', label: 'WARP +', row: 2, onSelect: () => adjustDistortion(0.15) },
         ]);
         ui.attachReticle(renderer.rig);
         renderer.scene.add(ui.group);
@@ -155,6 +157,7 @@ export function App(): JSX.Element {
       `Orient     ${currentOrientation()}`,
       `Tracking   ${fallbackMotionRef.current?.isReceivingData() ? 'active' : 'idle'}`,
       `Eye sep    ${(renderer.getLensSeparation() * 1000).toFixed(0)}mm`,
+      `FOV        ${renderer.getFieldOfView().toFixed(0)}deg`,
       `Warp       ${renderer.getDistortionStrength().toFixed(2)}`,
       '',
       'Tap x3 off-menu to recentre',
@@ -178,6 +181,16 @@ export function App(): JSX.Element {
     const renderer = stereoRendererRef.current;
     if (!renderer) return;
     renderer.setDistortionStrength(renderer.getDistortionStrength() + delta);
+    refreshInfoPanel();
+  }, [refreshInfoPanel]);
+
+  // Matches the rendered field of view to what the lenses actually show.
+  // A mismatch is what makes flat walls bulge and corners round off as you
+  // turn — the world reads as a sheet wrapped round a sphere.
+  const adjustFieldOfView = useCallback((deltaDegrees: number) => {
+    const renderer = stereoRendererRef.current;
+    if (!renderer) return;
+    renderer.setFieldOfView(renderer.getFieldOfView() + deltaDegrees);
     refreshInfoPanel();
   }, [refreshInfoPanel]);
 

@@ -23,11 +23,22 @@ export const DEFAULT_LENS_SEPARATION_METERS = 0.063;
 // why lens separation is user-adjustable at runtime.
 const ASSUMED_SCREEN_PPI = 420;
 
-// Radial distortion coefficients at strength 1.0, expressed for a radius
-// normalised to the viewport half-height. Roughly equivalent to the stock
-// Cardboard v2 profile once its tan-angle units are converted.
-const BASE_K1 = 0.12;
-const BASE_K2 = 0.07;
+// Radial distortion coefficients at strength 1.0, for a radius normalised
+// so r = 1 at the furthest corner.
+//
+// The ratio between them matters as much as their size: k1 acts across the
+// mid-field while k2 concentrates at the periphery. A k1-heavy profile
+// curves the middle of the image — the world starts to feel like a sheet
+// wrapped round a sphere — while still under-correcting the edges. Stock
+// Cardboard v2 (k1 0.34, k2 0.55 in tan-angle units) works out near k1 ==
+// k2 ~ 0.22 in these units, so strength ~2.4 reproduces that profile.
+const BASE_K1 = 0.09;
+const BASE_K2 = 0.093;
+
+// Widening the frustum for warp margin costs centre resolution, since the
+// same pixels now cover a wider field. Rendering above screen resolution
+// buys it back; capped because the cost is quadratic.
+const MAX_SUPERSAMPLE = 1.5;
 
 const DISTORTION_VERTEX = /* glsl */ `
   varying vec2 vUv;
@@ -95,6 +106,7 @@ export class StereoRenderer {
   private ipd = DEFAULT_IPD_METERS;
   private lensSeparation = DEFAULT_LENS_SEPARATION_METERS;
   private distortionStrength = 1;
+  private fieldOfView = 75;
   private lastWidth = 0;
   private lastHeight = 0;
   private readonly sizeScratch = new THREE.Vector2();
@@ -121,12 +133,17 @@ export class StereoRenderer {
 
     // Half float keeps the dark night scene free of banding, since the
     // scene no longer writes straight to the 8-bit canvas. MSAA has to be
-    // requested explicitly: the canvas's own antialias flag does not apply
-    // to render targets.
+    // requested explicitly (the canvas antialias flag does not cover render
+    // targets) but stays at 2x: supersampling already antialiases, and on a
+    // phone the bandwidth of 4x on a half-float target costs more than it
+    // returns.
     this.renderTarget = new THREE.WebGLRenderTarget(1, 1, {
       type: THREE.HalfFloatType,
-      samples: 4,
+      samples: 2,
       depthBuffer: true,
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      generateMipmaps: false,
     });
 
     this.distortionMaterial = new THREE.ShaderMaterial({
@@ -178,8 +195,6 @@ export class StereoRenderer {
     this.lastHeight = height;
 
     this.renderer.setSize(width, height, false);
-    const pixelRatio = this.renderer.getPixelRatio();
-    this.renderTarget.setSize(Math.floor(width * pixelRatio), Math.floor(height * pixelRatio));
 
     const halfAspect = width / 2 / height;
     this.leftCamera.aspect = halfAspect;
@@ -199,12 +214,26 @@ export class StereoRenderer {
   // 0 disables the warp entirely, which is the escape hatch if a given
   // headset's lenses need none.
   setDistortionStrength(strength: number): void {
-    this.distortionStrength = Math.min(2.5, Math.max(0, strength));
+    this.distortionStrength = Math.min(3, Math.max(0, strength));
     this.applyEyeProjections();
   }
 
   getDistortionStrength(): number {
     return this.distortionStrength;
+  }
+
+  // Rendered field of view has to match what the lenses actually present,
+  // or the world swims as you turn: too narrow a render stretched across a
+  // wider optical field makes flat walls bulge and corners round off. The
+  // true value depends on lens magnification and eye relief, which the
+  // browser cannot know, so it is dialled in by eye.
+  setFieldOfView(degrees: number): void {
+    this.fieldOfView = Math.min(105, Math.max(45, degrees));
+    this.applyEyeProjections();
+  }
+
+  getFieldOfView(): number {
+    return this.fieldOfView;
   }
 
   // Rebuilds both eye frusta and every uniform the distortion pass depends
@@ -244,6 +273,18 @@ export class StereoRenderer {
     // that balloons with the aspect ratio.
     const fMax = 1 + k1 + k2;
 
+    // The warp magnifies the centre by exactly fMax, so rendering fMax
+    // larger restores one rendered texel per screen pixel there. Without
+    // this, turning the warp up visibly softens the image.
+    const supersample = Math.min(fMax, MAX_SUPERSAMPLE);
+    const pixelRatio = this.renderer.getPixelRatio();
+    this.renderTarget.setSize(
+      Math.floor(this.lastWidth * pixelRatio * supersample),
+      Math.floor(this.lastHeight * pixelRatio * supersample),
+    );
+
+    this.leftCamera.fov = this.fieldOfView;
+    this.rightCamera.fov = this.fieldOfView;
     this.leftCamera.updateProjectionMatrix();
     this.rightCamera.updateProjectionMatrix();
 
