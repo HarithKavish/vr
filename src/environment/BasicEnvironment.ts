@@ -455,6 +455,18 @@ export function buildEnvironment(scene: THREE.Scene, renderer: THREE.WebGLRender
   const ambient = new THREE.HemisphereLight(0x35507a, 0x08090c, 0.9);
   group.add(ambient);
 
+  // Fog exists to give the city its atmospheric depth at 26-330m. Across
+  // the room's 20m extent the FogExp2 factor peaks at
+  // 1 - exp(-(0.0018 * 20)^2) ~= 0.0013, i.e. about a quarter of one 8-bit
+  // level even against the brightest interior surface — so every interior
+  // fragment was interpolating a depth varying and evaluating an exponential
+  // to produce nothing. The city keeps its fog.
+  group.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials) material.fog = false;
+  });
+
   scene.add(group);
   scene.add(buildCityScape());
 }

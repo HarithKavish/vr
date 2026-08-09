@@ -98,7 +98,7 @@ export class VRInterface {
         const mesh = new THREE.Mesh(
           new THREE.PlaneGeometry(buttonWidth, buttonHeight),
           // Basic (unlit) so the UI stays readable in a dark night scene.
-          new THREE.MeshBasicMaterial({ map: texture, transparent: true }),
+          new THREE.MeshBasicMaterial({ map: texture, transparent: true, fog: false }),
         );
         mesh.position.set(
           startX + index * (buttonWidth + gap),
@@ -122,7 +122,7 @@ export class VRInterface {
     this.infoTexture.colorSpace = THREE.SRGBColorSpace;
     this.infoMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(0.62, 0.39),
-      new THREE.MeshBasicMaterial({ map: this.infoTexture, transparent: true }),
+      new THREE.MeshBasicMaterial({ map: this.infoTexture, transparent: true, fog: false }),
     );
     this.infoMesh.position.set(0, 1.62, -PANEL_DISTANCE);
     this.infoMesh.renderOrder = 10;
@@ -135,13 +135,13 @@ export class VRInterface {
     // keeps it readable over both the night sky and a lit UI panel.
     this.reticleHalo = new THREE.Mesh(
       new THREE.RingGeometry(0.014, 0.029, 32),
-      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45, depthTest: false }),
+      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45, depthTest: false, fog: false }),
     );
     this.reticleHalo.renderOrder = 998;
 
     this.reticleRing = new THREE.Mesh(
       new THREE.RingGeometry(0.016, 0.024, 32),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, depthTest: false }),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, depthTest: false, fog: false }),
     );
     this.reticleRing.renderOrder = 999;
 
