@@ -53,7 +53,7 @@ function buildInstancedClass(cls: HeightClass, variant: number): THREE.Instanced
     map,
     emissiveMap,
     emissive: 0xffffff,
-    emissiveIntensity: 1,
+    emissiveIntensity: 2.2,
     roughness: 0.55,
     metalness: 0.15,
   });

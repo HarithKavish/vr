@@ -242,7 +242,10 @@ function makeDownlight(x: number, z: number, castsShadow: boolean): THREE.Group 
   fixture.position.set(x, ROOM_HEIGHT - 0.04, z);
   group.add(fixture);
 
-  const light = new THREE.PointLight(0xffb877, 6, 14, 2);
+  // three.js r155+ uses physically-correct units by default: PointLight
+  // intensity is candela with inverse-square falloff, so the old value of 6
+  // delivered almost nothing at 4m and left the room black.
+  const light = new THREE.PointLight(0xffb877, 220, 26, 2);
   light.position.set(x, ROOM_HEIGHT - 0.25, z);
   if (castsShadow) {
     light.castShadow = true;
@@ -266,11 +269,11 @@ export function buildEnvironment(scene: THREE.Scene, renderer: THREE.WebGLRender
   const envTarget = pmrem.fromEquirectangular(sky);
   scene.environment = envTarget.texture;
   scene.background = sky;
-  scene.environmentIntensity = 0.55;
+  scene.environmentIntensity = 1.1;
   pmrem.dispose();
 
   // Haze thins the distant skyline, which is most of what sells scale.
-  scene.fog = new THREE.FogExp2(0x0a1018, 0.0026);
+  scene.fog = new THREE.FogExp2(0x101a30, 0.0018);
 
   const group = new THREE.Group();
 
@@ -283,8 +286,11 @@ export function buildEnvironment(scene: THREE.Scene, renderer: THREE.WebGLRender
     new THREE.MeshStandardMaterial({
       map: floorTexture,
       roughnessMap: floorRoughness,
-      roughness: 0.34,
-      metalness: 0.9,
+      // A near-fully-metallic floor has almost no diffuse response, so
+      // against a dark night sky it reads as a black mirror. Keep it
+      // polished but let it actually catch the ceiling lights.
+      roughness: 0.28,
+      metalness: 0.35,
       envMapIntensity: 1.1,
     }),
   );
@@ -342,11 +348,11 @@ export function buildEnvironment(scene: THREE.Scene, renderer: THREE.WebGLRender
 
   // Cool moonlight from outside balances the warm interior downlights —
   // that warm/cool split is a large part of the reference image's look.
-  const moonlight = new THREE.DirectionalLight(0x9ec0ff, 0.35);
+  const moonlight = new THREE.DirectionalLight(0x9ec0ff, 1.4);
   moonlight.position.set(-half * 1.5, ROOM_HEIGHT * 2, -half * 1.2);
   group.add(moonlight);
 
-  const ambient = new THREE.HemisphereLight(0x35507a, 0x08090c, 0.25);
+  const ambient = new THREE.HemisphereLight(0x35507a, 0x08090c, 0.9);
   group.add(ambient);
 
   scene.add(group);

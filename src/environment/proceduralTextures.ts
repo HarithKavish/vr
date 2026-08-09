@@ -86,12 +86,12 @@ export function createNightSkyEquirect(): THREE.CanvasTexture {
   const { canvas, ctx } = createCanvas(width, height);
 
   const sky = ctx.createLinearGradient(0, 0, 0, height);
-  sky.addColorStop(0, '#02030a');
-  sky.addColorStop(0.42, '#060b18');
-  sky.addColorStop(0.5, '#0d1524');
-  sky.addColorStop(0.54, '#1b2436');
-  sky.addColorStop(0.62, '#0a0f18');
-  sky.addColorStop(1, '#050609');
+  sky.addColorStop(0, '#070c18');
+  sky.addColorStop(0.42, '#0f1830');
+  sky.addColorStop(0.5, '#1a2947');
+  sky.addColorStop(0.54, '#243a5c');
+  sky.addColorStop(0.62, '#121b2c');
+  sky.addColorStop(1, '#0a0e16');
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, width, height);
 
