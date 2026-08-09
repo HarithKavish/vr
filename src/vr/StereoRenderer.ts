@@ -20,6 +20,7 @@ export class StereoRenderer {
   private readonly leftCamera: THREE.PerspectiveCamera;
   private readonly rightCamera: THREE.PerspectiveCamera;
   private ipd = DEFAULT_IPD_METERS;
+  private readonly sizeScratch = new THREE.Vector2();
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
@@ -77,8 +78,13 @@ export class StereoRenderer {
 
   // Renders left/right halves with no gap, no viewport stretching.
   renderStereoFrame(): void {
-    const width = this.renderer.domElement.width;
-    const height = this.renderer.domElement.height;
+    // getSize reports CSS pixels, which is what setViewport/setScissor
+    // expect — they apply the pixel ratio themselves. Reading
+    // domElement.width here instead would double-apply it, blowing the
+    // left eye up to full width and pushing the right eye off-screen.
+    this.renderer.getSize(this.sizeScratch);
+    const width = this.sizeScratch.x;
+    const height = this.sizeScratch.y;
     const halfWidth = width / 2;
 
     this.renderer.setScissorTest(true);
