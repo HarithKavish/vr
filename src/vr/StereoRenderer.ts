@@ -12,6 +12,15 @@ import * as THREE from 'three';
 // wire up to a calibration UI later without touching rendering logic.
 export const DEFAULT_IPD_METERS = 0.063;
 
+// Distance between the headset's two lens centres. The rendered image
+// centres must land on these, not on the centres of the screen halves.
+export const DEFAULT_LENS_SEPARATION_METERS = 0.063;
+
+// Browsers expose no physical screen size, so density has to be assumed.
+// ~420ppi is typical of a modern phone; the error this leaves is exactly
+// why lens separation is user-adjustable at runtime.
+const ASSUMED_SCREEN_PPI = 420;
+
 export class StereoRenderer {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
@@ -20,6 +29,8 @@ export class StereoRenderer {
   private readonly leftCamera: THREE.PerspectiveCamera;
   private readonly rightCamera: THREE.PerspectiveCamera;
   private ipd = DEFAULT_IPD_METERS;
+  private lensSeparation = DEFAULT_LENS_SEPARATION_METERS;
+  private lastWidth = 0;
   private readonly sizeScratch = new THREE.Vector2();
 
   constructor(canvas: HTMLCanvasElement) {
@@ -64,12 +75,53 @@ export class StereoRenderer {
     // the projection matrix and render nothing until the next valid resize.
     if (width <= 0 || height <= 0) return;
 
+    this.lastWidth = width;
+
     this.renderer.setSize(width, height, false);
     const halfAspect = width / 2 / height;
     this.leftCamera.aspect = halfAspect;
     this.rightCamera.aspect = halfAspect;
     this.leftCamera.updateProjectionMatrix();
     this.rightCamera.updateProjectionMatrix();
+    this.applyLensOffsets();
+  }
+
+  setLensSeparation(meters: number): void {
+    this.lensSeparation = Math.min(0.085, Math.max(0.045, meters));
+    if (this.lastWidth > 0) {
+      // updateProjectionMatrix rebuilds the matrix from scratch, wiping the
+      // off-axis term, so both must be reapplied together.
+      this.leftCamera.updateProjectionMatrix();
+      this.rightCamera.updateProjectionMatrix();
+      this.applyLensOffsets();
+    }
+  }
+
+  getLensSeparation(): number {
+    return this.lensSeparation;
+  }
+
+  // Shifts each eye's image so its optical centre lands on the headset's
+  // lens centre rather than the centre of its screen half. Without this the
+  // image centres sit half a screen width apart (~75mm on a typical phone)
+  // while the lenses are ~63mm apart, and the eyes cannot converge — the
+  // view stays split as two separate images instead of fusing into one.
+  private applyLensOffsets(): void {
+    const physicalWidth = (this.lastWidth * (window.devicePixelRatio || 1) / ASSUMED_SCREEN_PPI) * 0.0254;
+    const halfViewportWidth = physicalWidth / 4;
+    if (halfViewportWidth <= 0) return;
+
+    // How far each image centre must move inward, in metres, then expressed
+    // in NDC where 1 unit spans half of one eye's viewport.
+    const shiftMeters = halfViewportWidth - this.lensSeparation / 2;
+    const ndcShift = shiftMeters / halfViewportWidth;
+
+    // elements[8] is the projection's horizontal off-axis term; a positive
+    // value slides the image left, so the signs are mirrored per eye.
+    this.leftCamera.projectionMatrix.elements[8] = -ndcShift;
+    this.rightCamera.projectionMatrix.elements[8] = ndcShift;
+    this.leftCamera.projectionMatrixInverse.copy(this.leftCamera.projectionMatrix).invert();
+    this.rightCamera.projectionMatrixInverse.copy(this.rightCamera.projectionMatrix).invert();
   }
 
   setRigQuaternion(quaternion: THREE.Quaternion): void {

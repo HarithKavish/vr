@@ -5,6 +5,7 @@ export interface DiagnosticsState {
   webXR: boolean;
   tracking: boolean;
   fps: number;
+  lensSeparationMm: number;
 }
 
 export function Diagnostics({
@@ -24,6 +25,7 @@ export function Diagnostics({
       <div>WebXR: {state.webXR ? 'Yes' : 'No (fallback)'}</div>
       <div>Tracking: {state.tracking ? 'Active' : 'Idle'}</div>
       <div>FPS: {state.fps}</div>
+      <div>Eye sep: {state.lensSeparationMm.toFixed(0)}mm</div>
     </div>
   );
 }

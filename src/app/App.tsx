@@ -23,6 +23,7 @@ export function App(): JSX.Element {
     webXR: false,
     tracking: false,
     fps: 0,
+    lensSeparationMm: 63,
   });
 
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -92,7 +93,12 @@ export function App(): JSX.Element {
       fallbackMotionRef.current = motion;
 
       startRenderLoop(stereoRenderer);
-      setDiagnostics((d) => ({ ...d, vrActive: true, webXR: false }));
+      setDiagnostics((d) => ({
+        ...d,
+        vrActive: true,
+        webXR: false,
+        lensSeparationMm: stereoRenderer.getLensSeparation() * 1000,
+      }));
       setPhase('active');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to start VR session.';
@@ -131,6 +137,17 @@ export function App(): JSX.Element {
       }
     });
   };
+
+  // Nudges the two images together or apart until they fuse. The correct
+  // value depends on the headset's lens spacing and on the phone's true
+  // pixel density, neither of which the browser can report, so this has to
+  // be adjustable by the person actually looking through the lenses.
+  const adjustLensSeparation = useCallback((deltaMm: number) => {
+    const renderer = stereoRendererRef.current;
+    if (!renderer) return;
+    renderer.setLensSeparation(renderer.getLensSeparation() + deltaMm / 1000);
+    setDiagnostics((d) => ({ ...d, lensSeparationMm: renderer.getLensSeparation() * 1000 }));
+  }, []);
 
   const handleCenterView = useCallback(() => {
     const motion = fallbackMotionRef.current;
@@ -195,6 +212,18 @@ export function App(): JSX.Element {
         <div className="vr-controls">
           <button className="vr-control-button" onClick={handleCenterView}>
             CENTER VIEW
+          </button>
+          <button
+            className="vr-control-button vr-control-button--ghost"
+            onClick={() => adjustLensSeparation(-2)}
+          >
+            EYE −
+          </button>
+          <button
+            className="vr-control-button vr-control-button--ghost"
+            onClick={() => adjustLensSeparation(2)}
+          >
+            EYE +
           </button>
           <button className="vr-control-button vr-control-button--secondary" onClick={handleExitVR}>
             EXIT
