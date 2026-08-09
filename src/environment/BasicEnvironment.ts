@@ -6,9 +6,9 @@ import * as THREE from 'three';
 // eight compass points and a few heights so any rotation shows something
 // new. No textures, no animation — geometry only, kept cheap for mobile.
 
-const ROOM_SIZE = 8;
-const ROOM_HEIGHT = 3.4;
-const RING_RADIUS = 2.6;
+const ROOM_SIZE = 16;
+const ROOM_HEIGHT = 5;
+const RING_RADIUS = 5.5;
 
 // North = -Z, East = +X, South = +Z, West = -X (Three.js right-handed, -Z forward).
 const WALL_COLORS = {
