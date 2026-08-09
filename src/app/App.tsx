@@ -6,8 +6,8 @@ import { FallbackMotion } from '../vr/FallbackMotion';
 import { Calibration } from '../vr/Calibration';
 import { StereoRenderer } from '../vr/StereoRenderer';
 import { buildEnvironment } from '../environment/BasicEnvironment';
+import { VRInterface } from '../vr/VRInterface';
 import { LandingScreen } from '../ui/LandingScreen';
-import { Diagnostics, type DiagnosticsState } from '../ui/Diagnostics';
 
 type Phase = 'landing' | 'starting' | 'active';
 
@@ -15,23 +15,18 @@ export function App(): JSX.Element {
   const [phase, setPhase] = useState<Phase>('landing');
   const [caps, setCaps] = useState<VRCapabilities | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [diagnosticsVisible, setDiagnosticsVisible] = useState(true);
-  const [diagnostics, setDiagnostics] = useState<DiagnosticsState>({
-    vrActive: false,
-    fullscreen: false,
-    orientation: 'portrait',
-    webXR: false,
-    tracking: false,
-    fps: 0,
-    lensSeparationMm: 63,
-  });
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stereoRendererRef = useRef<StereoRenderer | null>(null);
   const fallbackMotionRef = useRef<FallbackMotion | null>(null);
+  const vrInterfaceRef = useRef<VRInterface | null>(null);
   const calibrationRef = useRef(new Calibration());
   const fpsRef = useRef({ frames: 0, lastSample: performance.now() });
+  // Diagnostics live in a ref, not React state: they refresh twice a second
+  // and now render into the scene, so routing them through React would only
+  // re-render the tree for nothing.
+  const statsRef = useRef({ fps: 0 });
 
   useEffect(() => {
     detectCapabilities().then(setCaps).catch(() => setCaps(null));
@@ -40,7 +35,6 @@ export function App(): JSX.Element {
   const stopEverything = useCallback(() => {
     fallbackMotionRef.current?.stop();
     setPhase('landing');
-    setDiagnostics((d) => ({ ...d, vrActive: false, tracking: false }));
   }, []);
 
   const handleEnterVR = useCallback(async () => {
@@ -59,6 +53,19 @@ export function App(): JSX.Element {
         const renderer = new StereoRenderer(canvasRef.current);
         buildEnvironment(renderer.scene, renderer.renderer);
         stereoRendererRef.current = renderer;
+
+        // All controls live in the scene so they render through the same
+        // stereo path as the room and appear properly in both eyes.
+        const ui = new VRInterface([
+          { id: 'center', label: 'CENTER', onSelect: () => handleCenterView() },
+          { id: 'eye-minus', label: 'EYE −', onSelect: () => adjustLensSeparation(-2) },
+          { id: 'eye-plus', label: 'EYE +', onSelect: () => adjustLensSeparation(2) },
+          { id: 'info', label: 'INFO', onSelect: () => ui.setInfoVisible(!ui.isInfoVisible()) },
+          { id: 'exit', label: 'EXIT', onSelect: () => void handleExitVR() },
+        ]);
+        ui.attachReticle(renderer.rig);
+        renderer.scene.add(ui.group);
+        vrInterfaceRef.current = ui;
       }
       const stereoRenderer = stereoRendererRef.current;
       stereoRenderer.resize(window.innerWidth, window.innerHeight);
@@ -93,12 +100,7 @@ export function App(): JSX.Element {
       fallbackMotionRef.current = motion;
 
       startRenderLoop(stereoRenderer);
-      setDiagnostics((d) => ({
-        ...d,
-        vrActive: true,
-        webXR: false,
-        lensSeparationMm: stereoRenderer.getLensSeparation() * 1000,
-      }));
+      refreshInfoPanel();
       setPhase('active');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to start VR session.';
@@ -118,25 +120,36 @@ export function App(): JSX.Element {
         calibrationRef.current.apply(tmpQuat, calibratedQuat);
         stereoRenderer.setRigQuaternion(calibratedQuat);
       }
+
+      // Gaze pointing has to resolve before drawing so the reticle and any
+      // hover highlight land in the same frame the user is looking at.
+      vrInterfaceRef.current?.update(stereoRenderer.rig);
       stereoRenderer.renderStereoFrame();
 
       const fps = fpsRef.current;
       fps.frames += 1;
       const now = performance.now();
       if (now - fps.lastSample >= 500) {
-        const currentFps = Math.round((fps.frames * 1000) / (now - fps.lastSample));
+        statsRef.current.fps = Math.round((fps.frames * 1000) / (now - fps.lastSample));
         fps.frames = 0;
         fps.lastSample = now;
-        setDiagnostics((d) => ({
-          ...d,
-          fps: currentFps,
-          fullscreen: isFullscreenActive(),
-          orientation: currentOrientation(),
-          tracking: fallbackMotionRef.current?.isReceivingData() ?? false,
-        }));
+        refreshInfoPanel();
       }
     });
   };
+
+  const refreshInfoPanel = useCallback(() => {
+    const ui = vrInterfaceRef.current;
+    const renderer = stereoRendererRef.current;
+    if (!ui || !renderer) return;
+    ui.setInfoLines([
+      `FPS        ${statsRef.current.fps}`,
+      `Fullscreen ${isFullscreenActive() ? 'yes' : 'no'}`,
+      `Orient     ${currentOrientation()}`,
+      `Tracking   ${fallbackMotionRef.current?.isReceivingData() ? 'active' : 'idle'}`,
+      `Eye sep    ${(renderer.getLensSeparation() * 1000).toFixed(0)}mm`,
+    ]);
+  }, []);
 
   // Nudges the two images together or apart until they fuse. The correct
   // value depends on the headset's lens spacing and on the phone's true
@@ -146,8 +159,8 @@ export function App(): JSX.Element {
     const renderer = stereoRendererRef.current;
     if (!renderer) return;
     renderer.setLensSeparation(renderer.getLensSeparation() + deltaMm / 1000);
-    setDiagnostics((d) => ({ ...d, lensSeparationMm: renderer.getLensSeparation() * 1000 }));
-  }, []);
+    refreshInfoPanel();
+  }, [refreshInfoPanel]);
 
   const handleCenterView = useCallback(() => {
     const motion = fallbackMotionRef.current;
@@ -164,6 +177,28 @@ export function App(): JSX.Element {
     await exitVRSession();
     stopEverything();
   }, [stopEverything]);
+
+  // Keep the reticle out of the scene while not presenting, so re-entering
+  // VR does not stack a second one on the rig.
+  useEffect(() => {
+    return () => {
+      vrInterfaceRef.current?.dispose();
+      vrInterfaceRef.current = null;
+    };
+  }, []);
+
+  // The headset's button is just a capacitive tap on the screen, and it
+  // lands wherever the lever touches — so any tap anywhere counts as a
+  // select on whatever the reticle is currently over.
+  useEffect(() => {
+    if (phase !== 'active') return;
+    const onTap = (event: Event) => {
+      event.preventDefault();
+      vrInterfaceRef.current?.activate();
+    };
+    window.addEventListener('pointerdown', onTap);
+    return () => window.removeEventListener('pointerdown', onTap);
+  }, [phase]);
 
   useEffect(() => {
     const onResize = () => {
@@ -208,36 +243,9 @@ export function App(): JSX.Element {
         />
       )}
 
-      {phase === 'active' && (
-        <div className="vr-controls">
-          <button className="vr-control-button" onClick={handleCenterView}>
-            CENTER VIEW
-          </button>
-          <button
-            className="vr-control-button vr-control-button--ghost"
-            onClick={() => adjustLensSeparation(-2)}
-          >
-            EYE −
-          </button>
-          <button
-            className="vr-control-button vr-control-button--ghost"
-            onClick={() => adjustLensSeparation(2)}
-          >
-            EYE +
-          </button>
-          <button className="vr-control-button vr-control-button--secondary" onClick={handleExitVR}>
-            EXIT
-          </button>
-          <button
-            className="vr-control-button vr-control-button--ghost"
-            onClick={() => setDiagnosticsVisible((v) => !v)}
-          >
-            DIAG
-          </button>
-        </div>
-      )}
-
-      <Diagnostics state={diagnostics} visible={phase === 'active' && diagnosticsVisible} />
+      {/* No DOM overlay while active: a flat HTML layer sits on top of both
+          eyes at once and cannot be fused, so every control and readout is
+          scene geometry instead — see VRInterface. */}
     </div>
   );
 }
