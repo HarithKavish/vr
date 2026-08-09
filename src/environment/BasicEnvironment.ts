@@ -66,17 +66,8 @@ function makeGlazedWall(def: WallDef): THREE.Group {
   glass.rotation.y = def.rotationY;
   group.add(glass);
 
-  // Vertical mullions dividing the glazing into bays.
-  const bays = 7;
-  const mullionGeometry = new THREE.BoxGeometry(0.07, ROOM_HEIGHT, 0.12);
-  for (let i = 1; i < bays; i++) {
-    const t = (i / bays - 0.5) * ROOM_SIZE;
-    const mullion = new THREE.Mesh(mullionGeometry, frameMaterial);
-    mullion.position.copy(origin).add(def.tangent.clone().multiplyScalar(t));
-    mullion.rotation.y = def.rotationY;
-    mullion.castShadow = true;
-    group.add(mullion);
-  }
+  // Mullions are built separately, as one instanced mesh across all four
+  // walls — see buildMullions.
 
   // Head and sill rails.
   const railGeometry = new THREE.BoxGeometry(ROOM_SIZE, 0.16, 0.16);
@@ -94,6 +85,43 @@ function makeGlazedWall(def: WallDef): THREE.Group {
   group.add(transom);
 
   return group;
+}
+
+// Every mullion is the same box in the same material, differing only by
+// position and wall rotation, so all 24 collapse into one instanced draw
+// without touching their geometry or appearance.
+const MULLION_BAYS = 7;
+
+function buildMullions(walls: WallDef[]): THREE.InstancedMesh {
+  const perWall = MULLION_BAYS - 1;
+  const mesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(0.07, ROOM_HEIGHT, 0.12),
+    frameMaterial,
+    walls.length * perWall,
+  );
+
+  const matrix = new THREE.Matrix4();
+  const position = new THREE.Vector3();
+  const quaternion = new THREE.Quaternion();
+  const euler = new THREE.Euler();
+  const scale = new THREE.Vector3(1, 1, 1);
+
+  let index = 0;
+  for (const def of walls) {
+    const origin = new THREE.Vector3(...def.position);
+    euler.set(0, def.rotationY, 0);
+    quaternion.setFromEuler(euler);
+    for (let i = 1; i < MULLION_BAYS; i++) {
+      const t = (i / MULLION_BAYS - 0.5) * ROOM_SIZE;
+      position.copy(origin).addScaledVector(def.tangent, t);
+      matrix.compose(position, quaternion, scale);
+      mesh.setMatrixAt(index++, matrix);
+    }
+  }
+
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.castShadow = true;
+  return mesh;
 }
 
 function makeArmchair(): THREE.Group {
@@ -174,37 +202,74 @@ function makeLowTable(): THREE.Group {
   return table;
 }
 
-function makePlanter(): THREE.Group {
-  const plant = new THREE.Group();
+const BLADES_PER_PLANTER = 14;
+
+// Blades previously carried their length in their geometry, so every one
+// was a separate PlaneGeometry and could not be instanced. A unit-height
+// plane with the length moved into the instance scale is exactly
+// equivalent — PlaneGeometry(w, h) places its vertices at +/-h/2, so
+// scaling PlaneGeometry(w, 1) by h lands on the identical positions, and
+// UVs and normals are unaffected.
+const bladeGeometry = new THREE.PlaneGeometry(0.09, 1);
+const bladeMaterial = new THREE.MeshStandardMaterial({
+  color: 0x2c5738,
+  roughness: 0.7,
+  side: THREE.DoubleSide,
+});
+
+function makePlanterPot(): THREE.Mesh {
   const pot = new THREE.Mesh(
     new THREE.CylinderGeometry(0.19, 0.15, 0.42, 18),
     new THREE.MeshStandardMaterial({ color: 0x17181b, roughness: 0.5, metalness: 0.3 }),
   );
   pot.position.y = 0.21;
-  plant.add(pot);
+  pot.castShadow = true;
+  pot.receiveShadow = true;
+  return pot;
+}
 
-  const leafMaterial = new THREE.MeshStandardMaterial({
-    color: 0x2c5738,
-    roughness: 0.7,
-    side: THREE.DoubleSide,
-  });
-  for (let i = 0; i < 14; i++) {
-    const length = 0.5 + Math.random() * 0.5;
-    const blade = new THREE.Mesh(new THREE.PlaneGeometry(0.09, length), leafMaterial);
-    const angle = (i / 14) * Math.PI * 2 + Math.random() * 0.3;
-    const lean = 0.25 + Math.random() * 0.5;
-    blade.position.set(Math.cos(angle) * 0.06, 0.42 + length / 2 * 0.8, Math.sin(angle) * 0.06);
-    blade.rotation.set(Math.cos(angle) * lean, angle, Math.sin(angle) * lean);
-    plant.add(blade);
+// One instanced draw for every blade of every planter. Each planter's own
+// placement is folded into the instance matrices, so the blades keep the
+// exact transforms they had as children of a planter group.
+function buildPlanterBlades(planters: THREE.Object3D[]): THREE.InstancedMesh {
+  const mesh = new THREE.InstancedMesh(
+    bladeGeometry,
+    bladeMaterial,
+    planters.length * BLADES_PER_PLANTER,
+  );
+
+  const matrix = new THREE.Matrix4();
+  const planterMatrix = new THREE.Matrix4();
+  const position = new THREE.Vector3();
+  const quaternion = new THREE.Quaternion();
+  const euler = new THREE.Euler();
+  const scale = new THREE.Vector3();
+
+  let index = 0;
+  for (const planter of planters) {
+    planter.updateMatrix();
+    planterMatrix.copy(planter.matrix);
+
+    for (let i = 0; i < BLADES_PER_PLANTER; i++) {
+      const length = 0.5 + Math.random() * 0.5;
+      const angle = (i / BLADES_PER_PLANTER) * Math.PI * 2 + Math.random() * 0.3;
+      const lean = 0.25 + Math.random() * 0.5;
+
+      position.set(Math.cos(angle) * 0.06, 0.42 + (length / 2) * 0.8, Math.sin(angle) * 0.06);
+      euler.set(Math.cos(angle) * lean, angle, Math.sin(angle) * lean);
+      quaternion.setFromEuler(euler);
+      scale.set(1, length, 1);
+
+      matrix.compose(position, quaternion, scale);
+      matrix.premultiply(planterMatrix);
+      mesh.setMatrixAt(index++, matrix);
+    }
   }
 
-  plant.traverse((obj) => {
-    if (obj instanceof THREE.Mesh) {
-      obj.castShadow = true;
-      obj.receiveShadow = true;
-    }
-  });
-  return plant;
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
 }
 
 function makeCeiling(group: THREE.Group, half: number): void {
@@ -309,9 +374,11 @@ export function buildEnvironment(scene: THREE.Scene, renderer: THREE.WebGLRender
 
   makeCeiling(group, half);
 
-  for (const wall of buildWallDefs(half)) {
+  const wallDefs = buildWallDefs(half);
+  for (const wall of wallDefs) {
     group.add(makeGlazedWall(wall));
   }
+  group.add(buildMullions(wallDefs));
 
   const spacing = half * 0.5;
   let shadowCaster = true;
@@ -339,12 +406,18 @@ export function buildEnvironment(scene: THREE.Scene, renderer: THREE.WebGLRender
   table.rotation.y = Math.PI * 0.92;
   group.add(table);
 
+  const planters: THREE.Object3D[] = [];
   for (const [px, pz] of [[-3.4, -3.6], [3.8, -4.2], [-4.2, 3.4]] as const) {
-    const planter = makePlanter();
+    const planter = new THREE.Group();
     planter.position.set(px, 0, pz);
     planter.rotation.y = Math.random() * Math.PI;
+    planter.add(makePlanterPot());
     group.add(planter);
+    planters.push(planter);
   }
+  // Blades live at the room level rather than under each planter, since one
+  // instanced mesh now covers all of them.
+  group.add(buildPlanterBlades(planters));
 
   const rug = new THREE.Mesh(
     new THREE.CircleGeometry(1.9, 40),
