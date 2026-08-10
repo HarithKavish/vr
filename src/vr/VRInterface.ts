@@ -161,15 +161,17 @@ export class VRInterface {
     const h = canvas.height;
     ctx.clearRect(0, 0, w, h);
 
-    ctx.fillStyle = hovered ? 'rgba(56,132,255,0.94)' : 'rgba(16,20,28,0.88)';
+    // Shared-theme dark tokens: --surface-strong for the face, --accent for
+    // the hover fill, --border for the edge, --text for the label.
+    ctx.fillStyle = hovered ? 'rgba(206,223,230,0.92)' : 'rgba(18,26,31,0.88)';
     roundedRect(ctx, 6, 6, w - 12, h - 12, 22);
     ctx.fill();
 
-    ctx.strokeStyle = hovered ? '#dbe9ff' : 'rgba(150,175,210,0.55)';
+    ctx.strokeStyle = hovered ? '#f3f8fa' : 'rgba(255,255,255,0.20)';
     ctx.lineWidth = hovered ? 5 : 3;
     ctx.stroke();
 
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = hovered ? '#0b1014' : '#eef2f4';
     ctx.font = 'bold 46px system-ui, -apple-system, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -184,14 +186,14 @@ export class VRInterface {
     const h = this.infoCanvas.height;
     ctx.clearRect(0, 0, w, h);
 
-    ctx.fillStyle = 'rgba(10,14,20,0.82)';
+    ctx.fillStyle = 'rgba(11,16,20,0.86)';
     roundedRect(ctx, 6, 6, w - 12, h - 12, 20);
     ctx.fill();
-    ctx.strokeStyle = 'rgba(150,175,210,0.45)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
     ctx.lineWidth = 3;
     ctx.stroke();
 
-    ctx.fillStyle = '#cfe0f5';
+    ctx.fillStyle = '#a4afb6';
     ctx.font = '30px ui-monospace, SFMono-Regular, Menlo, monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
@@ -235,7 +237,8 @@ export class VRInterface {
       }
       this.hovered = next;
 
-      (this.reticleRing.material as THREE.MeshBasicMaterial).color.set(next ? 0x6cb0ff : 0xffffff);
+      // --accent when over a target, --accent-strong otherwise.
+      (this.reticleRing.material as THREE.MeshBasicMaterial).color.set(next ? 0xcedfe6 : 0xf3f8fa);
     }
 
     const distance = hit ? Math.max(hit.distance - 0.03, 0.3) : RETICLE_BASE_DISTANCE;

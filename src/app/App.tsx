@@ -277,6 +277,13 @@ export function App(): JSX.Element {
     };
   }, []);
 
+  // The landing scrolls like any other page in the family; only presenting
+  // locks the document, so the page cannot rubber-band under the headset.
+  useEffect(() => {
+    document.body.classList.toggle('vr-presenting', phase !== 'landing');
+    return () => document.body.classList.remove('vr-presenting');
+  }, [phase]);
+
   useEffect(() => {
     return () => {
       stereoRendererRef.current?.renderer.setAnimationLoop(null);
@@ -285,12 +292,16 @@ export function App(): JSX.Element {
   }, []);
 
   return (
-    <div ref={containerRef} className="vr-root">
-      <canvas
-        ref={canvasRef}
-        className="vr-canvas"
-        style={{ display: phase === 'active' ? 'block' : 'none' }}
-      />
+    <>
+      {/* The fullscreen target. It becomes visible from 'starting' rather
+          than 'active', because requestFullscreen runs during that step and
+          cannot be granted to a hidden element. */}
+      <div
+        ref={containerRef}
+        className={`vr-stage${phase === 'landing' ? '' : ' vr-stage--visible'}`}
+      >
+        <canvas ref={canvasRef} className="vr-canvas" />
+      </div>
 
       {phase !== 'active' && (
         <LandingScreen
@@ -304,6 +315,6 @@ export function App(): JSX.Element {
       {/* No DOM overlay while active: a flat HTML layer sits on top of both
           eyes at once and cannot be fused, so every control and readout is
           scene geometry instead — see VRInterface. */}
-    </div>
+    </>
   );
 }

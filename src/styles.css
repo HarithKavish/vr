@@ -1,27 +1,33 @@
-* {
+/* The palette, typography and components come from the shared theme at
+   harithkavish.com/style.css, linked in index.html — the same way Nexus
+   picks it up. Only the pieces that theme has no concept of live here:
+   the VR stage, the canvas, and the landing's app-launcher layout. */
+
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
-html, body, #root {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-  background: #000;
+/* While presenting, the page must not scroll or rubber-band under the
+   headset. On the landing it behaves like any other site in the family. */
+body.vr-presenting {
   overflow: hidden;
   overscroll-behavior: none;
+  touch-action: none;
 }
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  color: #f0f0f0;
+/* The fullscreen target. Hidden until VR starts so the landing is an
+   ordinary document, then it covers everything in black. */
+.vr-stage {
+  display: none;
 }
 
-.vr-root {
+.vr-stage--visible {
+  display: block;
   position: fixed;
   inset: 0;
-  width: 100%;
-  height: 100%;
+  z-index: 100;
   background: #000;
 }
 
@@ -33,130 +39,47 @@ body {
   display: block;
 }
 
-.landing {
-  position: absolute;
-  inset: 0;
+/* Centres the launcher in the viewport without fighting the shared shell,
+   which is built for scrolling content pages. */
+.vr-launcher {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
+  gap: 1.5rem;
+}
+
+.vr-launcher__actions {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
-  gap: 1.25rem;
-  padding: 2rem 1.5rem;
-  text-align: center;
+  gap: 0.75rem;
 }
 
-.landing-title {
-  font-size: 2rem;
-  letter-spacing: 0.35em;
+.vr-capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
   margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.landing-subtitle {
-  margin: 0;
-  color: #aaa;
-  font-size: 0.95rem;
+/* Device facts read better as a compact key/value line than as prose. */
+.vr-capability {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
 }
 
-.enter-vr-button {
-  padding: 0.9rem 2.5rem;
-  font-size: 1.1rem;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  background: #2d7cf0;
-  color: #fff;
-  border: none;
-  border-radius: 0.5rem;
-  cursor: pointer;
-}
-
-.enter-vr-button:disabled {
-  background: #3a4a63;
-  cursor: default;
-}
-
-.landing-error {
-  max-width: 26rem;
-  padding: 0.75rem 1rem;
-  background: rgba(220, 80, 60, 0.15);
-  border: 1px solid rgba(220, 80, 60, 0.5);
-  border-radius: 0.4rem;
-  font-size: 0.85rem;
-  color: #ffb3a7;
-}
-
-.status-panel {
-  width: 100%;
-  max-width: 22rem;
-  border: 1px solid #333;
-  border-radius: 0.5rem;
-  padding: 0.75rem 1rem;
+.vr-capability__label {
+  color: var(--muted);
   font-size: 0.85rem;
 }
 
-.status-panel--loading {
-  color: #888;
-  padding: 1rem;
-}
-
-.status-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 0.25rem 0;
-  border-bottom: 1px solid #222;
-}
-
-.status-row:last-child {
-  border-bottom: none;
-}
-
-.status-label {
-  color: #999;
-}
-
-.status-value {
-  font-weight: 600;
-}
-
-.vr-controls {
-  position: absolute;
-  bottom: 1rem;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 0.6rem;
-  z-index: 10;
-}
-
-.vr-control-button {
-  padding: 0.6rem 1.1rem;
-  font-size: 0.8rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  background: rgba(45, 124, 240, 0.85);
-  color: #fff;
-  border: none;
-  border-radius: 0.4rem;
-  cursor: pointer;
-}
-
-.vr-control-button--secondary {
-  background: rgba(90, 90, 90, 0.85);
-}
-
-.vr-control-button--ghost {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.diagnostics {
-  position: absolute;
-  top: 0.5rem;
-  left: 0.5rem;
-  padding: 0.5rem 0.65rem;
-  background: rgba(0, 0, 0, 0.55);
-  border-radius: 0.35rem;
-  font-size: 0.7rem;
-  line-height: 1.4;
-  font-family: monospace;
-  pointer-events: none;
-  z-index: 10;
+.vr-error {
+  border: 1px solid rgba(200, 90, 70, 0.45);
+  background: rgba(200, 90, 70, 0.1);
+  border-radius: 1.4rem;
+  padding: 0.85rem 1.15rem;
+  font-size: 0.9rem;
 }
