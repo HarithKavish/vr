@@ -12,14 +12,14 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <!-- Shared theme from the main site, so VR follows it automatically. -->
-    <link rel="stylesheet" href="https://harithkavish.com/style.css" />
-    <script>
-      // Set before first paint so the landing never flashes the wrong theme.
-      document.documentElement.dataset.theme =
-        localStorage.getItem('harithkavish-theme') ||
-        (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    </script>
+    <!-- The shared design system. theme-toggle.js applies the stored theme at
+         parse time, so the landing never flashes the wrong one. -->
+    <link rel="stylesheet" href="https://harithkavish.com/design-system/v1.0.0/tokens.css?v=20260829" />
+    <link rel="stylesheet" href="https://harithkavish.com/design-system/v1.0.0/base.css?v=20260829" />
+    <link rel="stylesheet" href="https://harithkavish.com/design-system/v1.0.0/components.css?v=20260829" />
+    <link rel="stylesheet" href="https://harithkavish.com/design-system/v1.0.0/utils.css?v=20260829" />
+    <script src="https://harithkavish.com/design-system/v1.0.0/theme-toggle.js?v=20260829"></script>
+    <script src="https://harithkavish.com/design-system/v1.0.0/harith-shell.js?v=20260829"></script>
     <title>VR — Harith Kavish</title>
   </head>
   <body>
