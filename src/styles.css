@@ -1,7 +1,6 @@
-/* The palette, typography and components come from the shared theme at
-   harithkavish.com/style.css, linked in index.html — the same way Nexus
-   picks it up. Only the pieces that theme has no concept of live here:
-   the VR stage, the canvas, and the landing's app-launcher layout. */
+/* The palette, typography and components come from the shared design system,
+   linked in index.html. Only the pieces it has no concept of live here: the VR
+   stage, the canvas, and the landing's app-launcher layout. */
 
 *,
 *::before,
@@ -77,9 +76,10 @@ body.vr-presenting {
 }
 
 .vr-error {
-  border: 1px solid rgba(200, 90, 70, 0.45);
-  background: rgba(200, 90, 70, 0.1);
-  border-radius: 1.4rem;
+  border: var(--border-hairline) solid var(--status-danger-border);
+  background: var(--status-danger-bg);
+  color: var(--status-danger-fg);
+  border-radius: var(--radius-card);
   padding: 0.85rem 1.15rem;
   font-size: 0.9rem;
 }

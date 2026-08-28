@@ -1,6 +1,5 @@
 import type { VRCapabilities } from '../vr/VRCapabilities';
 import { PermissionStatus } from './PermissionStatus';
-import { ThemeToggle } from './ThemeToggle';
 
 interface LandingScreenProps {
   caps: VRCapabilities | null;
@@ -14,20 +13,12 @@ interface LandingScreenProps {
 export function LandingScreen({ caps, errorMessage, starting, onEnterVR }: LandingScreenProps): JSX.Element {
   return (
     <div className="site-shell">
-      <header className="site-header">
-        <div className="site-header__inner">
-          <a className="brand" href="https://harithkavish.com/">
-            <img className="brand__mark" src="/icon-192.png" alt="" aria-hidden="true" />
-            <span className="brand__text">
-              <span className="brand__name">Harith Kavish</span>
-              <span className="brand__descriptor">VR</span>
-            </span>
-          </a>
-          <div className="site-header__actions">
-            <ThemeToggle />
-          </div>
-        </div>
-      </header>
+      <harith-header
+        site-title="Harith Kavish"
+        site-tagline="VR"
+        brand-href="https://harithkavish.com/"
+        brand-mark="/icon-192.png"
+      ></harith-header>
 
       <main className="site-main">
         <div className="section-head">
@@ -54,11 +45,7 @@ export function LandingScreen({ caps, errorMessage, starting, onEnterVR }: Landi
         </div>
       </main>
 
-      <footer className="site-footer">
-        <div className="site-footer__inner">
-          <p className="site-footer__copy">© {new Date().getFullYear()} Harith Kavish</p>
-        </div>
-      </footer>
+      <harith-footer copyright-text="Harith Kavish"></harith-footer>
     </div>
   );
 }
