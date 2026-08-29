@@ -18,7 +18,6 @@ export function LandingScreen({ caps, errorMessage, starting, onEnterVR }: Landi
         site-tagline="VR"
         brand-href="https://harithkavish.com/"
         brand-mark="/icon-192.png"
-        google-client-id="776989554929-6qev44ls5pdf3n2h6ktiheja5anm91so.apps.googleusercontent.com"
       ></harith-header>
 
       <main className="site-main">
